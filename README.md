@@ -136,19 +136,23 @@ pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512
 
 ## Performance
 
-Single core, on a 16 MB body chunked at 8 KB (not JMH-rigorous, but warmed up):
+Single core of a 10-core Apple Silicon machine, JDK 21, rewriting a 16 MB body
+chunked at 8 KB (not JMH-rigorous, but warmed up and min-of-N):
 
-| | MB/s/core | ns/byte |
+| Rewriter | MB/s/core | ns/byte |
 |---|---|---|
-| Literal / Word rewriter | ~210 | 4.5 |
+| `LiteralRewriter` / `WordLiteralRewriter` | ~210 | 4.5 |
 | `TokenRewriter` (capture + url-encode) | ~145 | 6.6 |
 | HTML text-node tokenizer | ~125 | 7.8 |
-| Pekko Streams overhead | ~0 | (Flow == raw) |
+| pass-through (no rewrite) | ~40,000 | 0.02 |
+| Pekko Streams overhead | ~0 | (Flow == raw `apply`) |
 
 O(n) time, **constant memory** (no full-body buffering). For per-request rewriting
 this is far below network/origin latency (a 100 KB page rewrites in ~0.5 ms), so the
-engine is never the bottleneck; throughput scales across cores. (`runMain prism.Bench`
-to reproduce.)
+engine is never the bottleneck; throughput scales across cores.
+
+> Reproduce: the `Bench` harness lives on the `bench` branch (kept off `main` so it
+> doesn't ship in the library jar): `git checkout bench && sbt "runMain prism.Bench"`.
 
 ## Scope & honest limitations
 
