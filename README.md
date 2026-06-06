@@ -136,24 +136,26 @@ pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512
 
 ## Performance
 
-Single core of a 10-core Apple Silicon machine, JDK 21, rewriting a 16 MB body
-chunked at 8 KB (not JMH-rigorous, but warmed up and min-of-N):
+JMH (forked JVM, warmed up, average time with confidence intervals), single core of
+a 10-core Apple Silicon machine, JDK 21, driving a ~1 MB body in 8 KB chunks:
 
-| Rewriter | MB/s/core | ns/byte |
-|---|---|---|
-| `LiteralRewriter` / `WordLiteralRewriter` | ~210 | 4.5 |
-| `TokenRewriter` (capture + url-encode) | ~145 | 6.6 |
-| HTML text-node tokenizer | ~125 | 7.8 |
-| pass-through (no rewrite) | ~40,000 | 0.02 |
-| Pekko Streams overhead | ~0 | (Flow == raw `apply`) |
+| Benchmark | MB/s/core | ns/byte | JMH (µs/op) |
+|---|---|---|---|
+| `LiteralRewriter` | ~205 | 4.6 | 4842 ± 56 |
+| `WordLiteralRewriter` | ~185 | 5.2 | 5450 ± 88 |
+| `TokenRewriter` (capture + url-encode) | ~130 | 7.3 | 7628 ± 145 |
+| `LiteralRewriter` via `RewriteFlow` | ~200 | 4.8 | 4986 ± 321 |
+| HTML text-node tokenizer (via Flow) | ~110 | 8.9 | 9360 ± 459 |
 
-O(n) time, **constant memory** (no full-body buffering). For per-request rewriting
-this is far below network/origin latency (a 100 KB page rewrites in ~0.5 ms), so the
-engine is never the bottleneck; throughput scales across cores.
+The `RewriteFlow` figure tracks the raw `apply` figure, so Pekko Streams adds
+essentially no overhead. O(n) time, **constant memory** (no full-body buffering). For
+per-request rewriting this is far below network/origin latency (a 100 KB page rewrites
+in well under a millisecond), so the engine is never the bottleneck; throughput scales
+across cores.
 
-> Reproduce: the `Bench` harness lives in the `bench` subproject (it depends on the
-> library, is never published, and is not aggregated by the root build, so it stays
-> out of the library jar): `sbt "bench/runMain prism.Bench"`.
+> Reproduce: `sbt "bench/Jmh/run"`. The benchmarks live in the `bench` subproject,
+> which depends on the library but is never published and is not aggregated by root,
+> so it stays out of the library jar.
 
 ## Scope & honest limitations
 

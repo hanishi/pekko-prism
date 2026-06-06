@@ -20,11 +20,12 @@ lazy val root = (project in file("."))
     )
   )
 
-// Throughput benchmark harness. Depends on the library, but is never published and
-// is NOT aggregated by root, so `compile` / `test` / `publish` don't touch it.
-// Run it explicitly:  sbt "bench/runMain prism.Bench"
+// JMH throughput benchmarks. Depends on the library, but is never published and is
+// NOT aggregated by root, so `compile` / `test` / `publish` don't touch it.
+// Run it explicitly:  sbt "bench/Jmh/run"
 lazy val bench = (project in file("bench"))
   .dependsOn(root)
+  .enablePlugins(JmhPlugin)
   .settings(
     name           := "prism-bench",
     publish / skip := true,
