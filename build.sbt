@@ -19,3 +19,14 @@ lazy val root = (project in file("."))
       "org.scalatest"    %% "scalatest"             % "3.2.19"         % Test
     )
   )
+
+// Throughput benchmark harness. Depends on the library, but is never published and
+// is NOT aggregated by root, so `compile` / `test` / `publish` don't touch it.
+// Run it explicitly:  sbt "bench/runMain prism.Bench"
+lazy val bench = (project in file("bench"))
+  .dependsOn(root)
+  .settings(
+    name           := "prism-bench",
+    publish / skip := true,
+    Compile / doc / sources := Seq.empty
+  )

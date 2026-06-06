@@ -151,8 +151,9 @@ O(n) time, **constant memory** (no full-body buffering). For per-request rewriti
 this is far below network/origin latency (a 100 KB page rewrites in ~0.5 ms), so the
 engine is never the bottleneck; throughput scales across cores.
 
-> Reproduce: the `Bench` harness lives on the `bench` branch (kept off `main` so it
-> doesn't ship in the library jar): `git checkout bench && sbt "runMain prism.Bench"`.
+> Reproduce: the `Bench` harness lives in the `bench` subproject (it depends on the
+> library, is never published, and is not aggregated by the root build, so it stays
+> out of the library jar): `sbt "bench/runMain prism.Bench"`.
 
 ## Scope & honest limitations
 
