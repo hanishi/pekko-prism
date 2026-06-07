@@ -235,4 +235,4 @@ sbt test
 
 Apache License 2.0. See [LICENSE](LICENSE).
 
-Copyright 2026 Programmer LLC.
+Copyright 2026 Haruhiko Nishi.
