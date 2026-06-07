@@ -135,6 +135,9 @@ strips them, which is for authorized security testing only, never production tra
 
 `ReverseProxy` is a flag-driven CLI variant of the same, handy for quick experiments.
 
+The full configuration reference (every setting, all rule types, how rules combine,
+and worked recipes) is in [`docs/proxy-config.md`](docs/proxy-config.md).
+
 ## Deploy (Docker / Kubernetes)
 
 A fat jar + container, ready for K8s: the proxy already exposes `/healthz`, drains
