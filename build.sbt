@@ -17,7 +17,18 @@ lazy val root = (project in file("."))
       "org.apache.pekko" %% "pekko-stream-testkit"  % pekkoVersion     % Test,
       "org.apache.pekko" %% "pekko-http-testkit"    % pekkoHttpVersion % Test,
       "org.scalatest"    %% "scalatest"             % "3.2.19"         % Test
-    )
+    ),
+    // Fat jar for containers: `sbt assembly` -> target/scala-3.3.4/prism-proxy.jar
+    assembly / mainClass       := Some("prism.ProxyServer"),
+    assembly / assemblyJarName := "prism-proxy.jar",
+    assembly / assemblyMergeStrategy := {
+      case p if p.endsWith("module-info.class")  => MergeStrategy.discard
+      case "reference.conf"                       => MergeStrategy.concat
+      case "application.conf"                     => MergeStrategy.concat
+      case PathList("META-INF", "services", _*)   => MergeStrategy.concat
+      case PathList("META-INF", _*)               => MergeStrategy.discard
+      case _                                       => MergeStrategy.first
+    }
   )
 
 // JMH throughput benchmarks. Depends on the library, but is never published and is

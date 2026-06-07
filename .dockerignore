@@ -1,0 +1,4 @@
+# Tiny build context: only the assembled jar and the config are needed.
+**
+!target/scala-3.3.4/prism-proxy.jar
+!proxy.conf

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prism-proxy-config
+data:
+  # Mounted at /config/proxy.conf; the proxy reads it as its config file.
+  # Editing this ConfigMap does NOT hot-reload the proxy (config is read at startup),
+  # so roll the Deployment after a change: kubectl rollout restart deploy/prism-proxy
+  proxy.conf: |
+    prism.proxy {
+      port   = 8080
+      origin = "http://upstream.default.svc.cluster.local"
+      accept = ["html"]
+      rules = [
+        { type = cookie-flags, http-only = true, secure = true, same-site = "Lax" }
+        { type = set-header,   name = "Content-Security-Policy", value = "default-src 'self'" }
+        { type = strip-header, name = "X-Powered-By" }
+      ]
+    }
+    pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512 }

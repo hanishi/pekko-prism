@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prism-proxy
+  labels:
+    app: prism-proxy
+spec:
+  selector:
+    app: prism-proxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  # ClusterIP by default; front it with an Ingress (which can terminate TLS) to
+  # expose it externally, or set type: LoadBalancer.
