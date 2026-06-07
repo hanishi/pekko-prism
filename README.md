@@ -44,16 +44,16 @@ in a byte stream, even when matches cross chunk boundaries, with backpressure an
 bounded memory. Different substrate, and a few deliberate upgrades that trace
 directly back to where the original hurt:
 
-| Concern | `jetty-prism` (Jetty 7/8 era) | here (Pekko) |
-|---|---|---|
-| Rewriting / translation map | partly Groovy | typed Scala, single-pass automaton |
-| Performance | Groovy + translate-everything, slow | JVM + Aho-Corasick (~210 MB/s/core) |
-| Text inside `<script>`/`<style>` | translated blindly | **optional**: skip with the HTML tokenizer, or rewrite all |
-| Multi-pattern match | Rabin-Karp, length-grouped | Aho-Corasick (tighter carry bound, linear) |
-| Chunk carry-over | dual `b0`/`b1` buffers, manual indexing | one `carry: ByteString` prepended to the next chunk |
-| "need more bytes" | `replace()==null` then break | smaller `consumed`; the tail stays in carry |
-| Flush at end | `flush()` | `onUpstreamFinish` with `atEOF=true` |
-| Backpressure | hand-rolled `_skip` counter | free, from Pekko Streams demand |
+| Concern                          | `jetty-prism` (Jetty 7/8 era)           | here (Pekko)                                               |
+| -------------------------------- | --------------------------------------- | ---------------------------------------------------------- |
+| Rewriting / translation map      | partly Groovy                           | typed Scala, single-pass automaton                         |
+| Performance                      | Groovy + translate-everything, slow     | JVM + Aho-Corasick (~210 MB/s/core)                        |
+| Text inside `<script>`/`<style>` | translated blindly                      | **optional**: skip with the HTML tokenizer, or rewrite all |
+| Multi-pattern match              | Rabin-Karp, length-grouped              | Aho-Corasick (tighter carry bound, linear)                 |
+| Chunk carry-over                 | dual `b0`/`b1` buffers, manual indexing | one `carry: ByteString` prepended to the next chunk        |
+| "need more bytes"                | `replace()==null` then break            | smaller `consumed`; the tail stays in carry                |
+| Flush at end                     | `flush()`                               | `onUpstreamFinish` with `atEOF=true`                       |
+| Backpressure                     | hand-rolled `_skip` counter             | free, from Pekko Streams demand                            |
 
 > Credit for the original concept: **Greg Wilkins / Webtide**. This implementation
 > shares none of the original code; it was rebuilt from the concept.
@@ -70,13 +70,13 @@ matcher-agnostic.
 
 ### Rewriters
 
-| Rewriter | What it does |
-|---|---|
-| `LiteralRewriter` | multi-pattern literal `from -> to` (whole body) |
-| `WordLiteralRewriter` | same, but only on whole words (`head` is not `header`/`ahead`) |
-| `UrlAttributeRewriter` | rewrite only HTML attribute *values* (`href`, `src`, …); case-insensitive, entity-decoding |
-| `TokenRewriter` | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there |
-| `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments |
+| Rewriter                                       | What it does                                                                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `LiteralRewriter`                              | multi-pattern literal `from -> to` (whole body)                                                                  |
+| `WordLiteralRewriter`                          | same, but only on whole words (`head` is not `header`/`ahead`)                                                   |
+| `UrlAttributeRewriter`                         | rewrite only HTML attribute *values* (`href`, `src`, …); case-insensitive, entity-decoding                       |
+| `TokenRewriter`                                | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there |
+| `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments  |
 
 The carry the streaming envelope retains never exceeds the longest pattern (+1 for
 the word/capture variants), so memory is bounded regardless of body size. The key
@@ -190,13 +190,13 @@ the config's `tls {}` block to serve HTTPS directly. Config changes need a
 JMH (forked JVM, warmed up, average time with confidence intervals), single core of
 a 10-core Apple Silicon machine, JDK 21, driving a ~1 MB body in 8 KB chunks:
 
-| Benchmark | MB/s/core | ns/byte | JMH (µs/op) |
-|---|---|---|---|
-| `LiteralRewriter` | ~205 | 4.6 | 4842 ± 56 |
-| `WordLiteralRewriter` | ~185 | 5.2 | 5450 ± 88 |
-| `TokenRewriter` (capture + url-encode) | ~130 | 7.3 | 7628 ± 145 |
-| `LiteralRewriter` via `RewriteFlow` | ~200 | 4.8 | 4986 ± 321 |
-| HTML text-node tokenizer (via Flow) | ~110 | 8.9 | 9360 ± 459 |
+| Benchmark                              | MB/s/core | ns/byte | JMH (µs/op) |
+| -------------------------------------- | --------- | ------- | ----------- |
+| `LiteralRewriter`                      | ~205      | 4.6     | 4842 ± 56   |
+| `WordLiteralRewriter`                  | ~185      | 5.2     | 5450 ± 88   |
+| `TokenRewriter` (capture + url-encode) | ~130      | 7.3     | 7628 ± 145  |
+| `LiteralRewriter` via `RewriteFlow`    | ~200      | 4.8     | 4986 ± 321  |
+| HTML text-node tokenizer (via Flow)    | ~110      | 8.9     | 9360 ± 459  |
 
 The `RewriteFlow` figure tracks the raw `apply` figure, so Pekko Streams adds
 essentially no overhead. O(n) time, **constant memory** (no full-body buffering). For
