@@ -24,11 +24,16 @@ pattern, regardless of body size.
 
 The concept is **Greg Wilkins'**, the creator of Jetty, founder of Webtide.
 
-At a large B2B marketplace, the site had no Japanese localization, yet memberships had
-to be sold to Japanese companies. A localized experience was needed over an origin
-that could not be changed. The problem went to Webtide, and Greg Wilkins'
-answer was **jetty-prism**: a streaming proxy, built on Jetty, that rewrote the page
-as it streamed through, translating English to Japanese on the fly. The translation
+At a Chinese tech company now known everywhere as a giant, its B2B marketplace had no
+Japanese localization, yet its Japanese joint venture had to sell memberships to
+Japanese companies. A localized experience was needed over an origin that could not be
+changed. A local systems integrator built the first attempt, but it merely tried to parse the
+whole page with regular expressions: to a vendor who only knows web development, every
+problem looks like web development. It was not acceptable. The real problem is harder: rewriting an
+HTTP body as it streams, correctly even when a match straddles a chunk boundary and
+without buffering the whole page. The job then went to Webtide, and Greg Wilkins'
+answer was **jetty-prism**: a streaming proxy, built on Jetty, that rewrote the page as
+it streamed through, translating English to Japanese on the fly. The translation
 map and texts were implemented partly in Groovy, and even strings found inside
 JavaScript were translated. It cost a lot of performance, but it worked, and it ran
 in production until the site shipped native Japanese localization.
@@ -224,5 +229,6 @@ sbt test
 ## Credits
 
 - **Concept:** Greg Wilkins (creator of Jetty, founder of Webtide), who designed the
-  original **jetty-prism**, a streaming localization proxy for a large B2B marketplace.
+  original **jetty-prism**, a streaming localization proxy for the Japanese joint
+  venture of a now-giant Chinese tech company's B2B marketplace.
 - **This reimplementation:** clean-room, from scratch, on Apache Pekko Streams.
