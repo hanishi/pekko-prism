@@ -15,14 +15,14 @@ FROM gcr.io/distroless/java21-debian12
 
 WORKDIR /app
 COPY target/scala-3.3.4/prism-proxy.jar /app/prism-proxy.jar
-COPY proxy.conf /app/proxy.conf
 
 # Non-root (numeric uid; matches the manifests' runAsUser: 1000).
 USER 1000
 
 EXPOSE 8080
 
-# MaxRAMPercentage so the JVM honours the container memory limit. The config path is
-# the final argument; in Kubernetes it is overridden to the mounted ConfigMap path.
+# Config is injected, not baked: with no argument the proxy runs on the built-in
+# application.conf defaults; pass a mounted file path to override (Kubernetes mounts
+# the ConfigMap and passes /config/proxy.conf). MaxRAMPercentage so the JVM honours
+# the container memory limit.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/prism-proxy.jar"]
-CMD ["/app/proxy.conf"]
