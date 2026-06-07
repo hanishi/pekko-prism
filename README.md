@@ -100,21 +100,34 @@ HOCON file (`prism.proxy`), no CLI flags. It adds the production niceties: a hea
 endpoint, `X-Forwarded-*`/`Via` headers, `502`/`504` on upstream failure, per-request
 access logs, connection-pool tuning, optional HTTPS, and graceful drain on SIGTERM.
 
+`rules` mixes **body** rules (rewrite the response body) and **header** rules (rewrite
+the parsed response headers, not the body text):
+
 ```hocon
 prism.proxy {
   port   = 8080
   origin = "http://localhost:9001"
   accept = ["html", "xml"]
   rules = [
+    # body
     { type = rewrite,       from = "internal.example.com", to = "www.example.com" }
     { type = rewrite-word,  from = "Color", to = "Colour" }
     { type = wrap-url,      anchor = "https://tracker.example.com",
                             template = "https://fp.example.com/collect?dest={enc}" }
     { type = insert-before, anchor = "</head>", html = "<script src=\"/x.js\"></script>" }
+    # header
+    { type = cookie-flags,  http-only = true, secure = true, same-site = "Lax" }
+    { type = set-header,    name = "Content-Security-Policy", value = "default-src 'self'" }
+    { type = strip-header,  name = "X-Powered-By" }
   ]
 }
 pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512 }
 ```
+
+Header rules work on the parsed model (`HttpCookie.withHttpOnly(...)`), not on body
+text, so a body rewrite can never corrupt `Content-Length`/`Set-Cookie` and vice
+versa. `cookie-flags` enforces flags (a deployable hardening); `http-only = false`
+strips them, which is for authorized security testing only, never production traffic.
 
 ```
 ./run-proxy-server.sh proxy.conf          # or: java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
@@ -122,6 +135,23 @@ pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512
 
 `ReverseProxy` is a flag-driven CLI variant of the same, handy for quick experiments;
 `Main` is a self-contained origin+proxy demo.
+
+## Deploy (Docker / Kubernetes)
+
+A fat jar + container, ready for K8s: the proxy already exposes `/healthz`, drains
+in-flight requests on SIGTERM, logs to stdout, and reads its config from a file.
+
+```
+sbt assembly                              # -> target/scala-3.3.4/prism-proxy.jar
+docker build -t prism-proxy:latest .
+kubectl apply -f deploy/                  # ConfigMap + Deployment + Service
+```
+
+`deploy/` wires the config in as a `ConfigMap` (mounted at `/config/proxy.conf`), with
+`readiness`/`liveness` probes on `/healthz` and `terminationGracePeriodSeconds: 30`
+(longer than the proxy's 10s drain). Front it with an Ingress to terminate TLS, or set
+`--tls` / the config's `tls {}` block to serve HTTPS directly. Config changes need a
+`kubectl rollout restart` (the proxy reads config at startup).
 
 ## What it's good for
 
@@ -133,6 +163,9 @@ pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512
 - **Capture-and-wrap**: first-party proxying of tracker/measurement URLs, VAST
   element/macro rewriting (`TokenRewriter`, `--xml`). The original `jetty-prism`
   translated; the same primitive proxies, wraps, and injects.
+- **Header / cookie hardening**: enforce `HttpOnly`/`Secure`/`SameSite`, inject CSP /
+  HSTS, strip `Server`/`X-Powered-By` in front of an app you can't change
+  (`cookie-flags`, `set-header`, `strip-header`).
 
 ## Performance
 
