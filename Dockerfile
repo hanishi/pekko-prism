@@ -14,9 +14,9 @@ WORKDIR /app
 COPY target/scala-3.3.4/prism-proxy.jar /app/prism-proxy.jar
 COPY proxy.conf /app/proxy.conf
 
-# Run as a non-root user.
-RUN useradd -r -u 1000 prism
-USER prism
+# Run as a non-root user. eclipse-temurin already provides uid 1000; reuse it
+# (the Kubernetes manifests also pin runAsUser: 1000 / runAsNonRoot).
+USER 1000
 
 EXPOSE 8080
 
