@@ -21,7 +21,7 @@ import scala.util.{Failure, Success}
 /**
  * Config-driven reverse proxy: a real Pekko HTTP service whose behaviour comes
  * entirely from a HOCON file (`prism.proxy` section), not CLI flags. See
- * `application.conf` for the schema. Run:
+ * `application.conf` for the schema and `docs/proxy-config.md` for the reference. Run:
  * {{{
  *   ./run-proxy-server.sh proxy.conf
  *   java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
@@ -37,21 +37,15 @@ object ProxyServer {
     Set("connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
         "te", "trailer", "transfer-encoding", "upgrade")
 
-  def main(args: Array[String]): Unit = {
-    // Load config: explicit file arg, else standard ConfigFactory (honours -Dconfig.file).
-    val config = args.headOption match {
-      case Some(path) =>
-        ConfigFactory.parseFile(new File(path)).withFallback(ConfigFactory.load()).resolve()
-      case None => ConfigFactory.load()
-    }
-    val cfg = ProxyConfig.from(config.getConfig("prism.proxy"))
-
-    implicit val system: ActorSystem[Nothing] =
-      ActorSystem(Behaviors.empty, "prism-proxy", config)
+  /**
+   * The request handler a config implies: proxy to the origin, rewrite the response,
+   * add forwarding headers, answer the health path, and map upstream failures to
+   * 502/504. Exposed (rather than inlined in [[main]]) so it can be tested directly.
+   */
+  def buildHandler(cfg: ProxyConfig)(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] = {
     import system.executionContext
-    val log = org.slf4j.LoggerFactory.getLogger("prism.proxy") // configured at INFO in logback.xml
-
-    val poolSettings = ConnectionPoolSettings(system) // from pekko.http.host-connection-pool
+    val log          = org.slf4j.LoggerFactory.getLogger("prism.proxy")
+    val poolSettings = ConnectionPoolSettings(system)
     val rewriteFlow  = cfg.rewriteFlow
     val scheme       = if (cfg.tls.isDefined) "https" else "http"
 
@@ -102,7 +96,7 @@ object ProxyServer {
         }
     }
 
-    val handler: HttpRequest => Future[HttpResponse] = { req =>
+    req => {
       val start = System.nanoTime()
       val result =
         if (req.uri.path.toString == cfg.healthPath)
@@ -114,22 +108,40 @@ object ProxyServer {
         resp
       }
     }
+  }
 
-    val httpsContext: Option[HttpsConnectionContext] = cfg.tls.map { case (keystore, password) =>
-      val ks = KeyStore.getInstance("PKCS12")
-      val in = new FileInputStream(keystore)
-      try ks.load(in, password.toCharArray) finally in.close()
-      val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
-      kmf.init(ks, password.toCharArray)
-      val ctx = SSLContext.getInstance("TLS")
-      ctx.init(kmf.getKeyManagers, null, new SecureRandom())
-      ConnectionContext.httpsServer(ctx)
+  /** Build the optional HTTPS context from a PKCS12 keystore. */
+  def httpsContext(cfg: ProxyConfig): Option[HttpsConnectionContext] = cfg.tls.map { case (keystore, password) =>
+    val ks = KeyStore.getInstance("PKCS12")
+    val in = new FileInputStream(keystore)
+    try ks.load(in, password.toCharArray) finally in.close()
+    val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
+    kmf.init(ks, password.toCharArray)
+    val ctx = SSLContext.getInstance("TLS")
+    ctx.init(kmf.getKeyManagers, null, new SecureRandom())
+    ConnectionContext.httpsServer(ctx)
+  }
+
+  def main(args: Array[String]): Unit = {
+    // Load config: explicit file arg, else standard ConfigFactory (honours -Dconfig.file).
+    val config = args.headOption match {
+      case Some(path) =>
+        ConfigFactory.parseFile(new File(path)).withFallback(ConfigFactory.load()).resolve()
+      case None => ConfigFactory.load()
     }
+    val cfg = ProxyConfig.from(config.getConfig("prism.proxy"))
+
+    implicit val system: ActorSystem[Nothing] =
+      ActorSystem(Behaviors.empty, "prism-proxy", config)
+    import system.executionContext
+    val log          = org.slf4j.LoggerFactory.getLogger("prism.proxy")
+    val poolSettings = ConnectionPoolSettings(system)
+    val scheme       = if (cfg.tls.isDefined) "https" else "http"
 
     val serverAt = Http().newServerAt(cfg.interface, cfg.port)
-    val server   = httpsContext.fold(serverAt)(serverAt.enableHttps)
+    val server   = httpsContext(cfg).fold(serverAt)(serverAt.enableHttps)
 
-    server.bind(handler).onComplete {
+    server.bind(buildHandler(cfg)).onComplete {
       case Success(binding) =>
         log.info("prism proxy {}://{}:{}/  ->  {}  ({} body + {} header rule(s), pool {}/{})",
           scheme, cfg.interface, cfg.port, cfg.origin,
