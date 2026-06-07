@@ -18,6 +18,8 @@ lazy val root = (project in file("."))
       "org.apache.pekko" %% "pekko-http-testkit"    % pekkoHttpVersion % Test,
       "org.scalatest"    %% "scalatest"             % "3.2.19"         % Test
     ),
+    // `sbt run` and the fat jar both default to the config-driven server.
+    Compile / run / mainClass  := Some("prism.ProxyServer"),
     // Fat jar for containers: `sbt assembly` -> target/scala-3.3.4/prism-proxy.jar
     assembly / mainClass       := Some("prism.ProxyServer"),
     assembly / assemblyJarName := "prism-proxy.jar",

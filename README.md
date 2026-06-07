@@ -133,8 +133,7 @@ strips them, which is for authorized security testing only, never production tra
 ./run-proxy-server.sh proxy.conf          # or: java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
 ```
 
-`ReverseProxy` is a flag-driven CLI variant of the same, handy for quick experiments;
-`Main` is a self-contained origin+proxy demo.
+`ReverseProxy` is a flag-driven CLI variant of the same, handy for quick experiments.
 
 ## Deploy (Docker / Kubernetes)
 
