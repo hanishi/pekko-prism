@@ -143,13 +143,24 @@ in-flight requests on SIGTERM, logs to stdout, and reads its config from a file.
 ```
 sbt assembly                              # -> target/scala-3.3.4/prism-proxy.jar
 docker build -t prism-proxy:latest .
+kind load docker-image prism-proxy:latest # local cluster only (see below)
 kubectl apply -f deploy/                  # ConfigMap + Deployment + Service
 ```
+
+The image is **distroless** (`gcr.io/distroless/java21-debian12`): ~237 MB, a real
+JVM on a minimal base with no shell or package manager, which shrinks the image and
+cuts the CVE/attack surface. Because there is no shell, debug with an ephemeral
+container (`kubectl debug -it <pod> --image=busybox`), not `kubectl exec -- sh`.
+
+For a **local** cluster the image must be made available to the nodes first, since
+they don't share the host's docker images: `kind load docker-image prism-proxy:latest`
+(kind/Docker Desktop), `minikube image load …`, or push to a registry the cluster can
+reach. Skipping this gives `ImagePullBackOff`.
 
 `deploy/` wires the config in as a `ConfigMap` (mounted at `/config/proxy.conf`), with
 `readiness`/`liveness` probes on `/healthz` and `terminationGracePeriodSeconds: 30`
 (longer than the proxy's 10s drain). Front it with an Ingress to terminate TLS, or set
-`--tls` / the config's `tls {}` block to serve HTTPS directly. Config changes need a
+the config's `tls {}` block to serve HTTPS directly. Config changes need a
 `kubectl rollout restart` (the proxy reads config at startup).
 
 ## What it's good for
