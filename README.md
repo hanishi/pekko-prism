@@ -25,8 +25,8 @@ pattern, regardless of body size.
 The concept is **Greg Wilkins'**, the creator of Jetty, founder of Webtide.
 
 At a large B2B marketplace, the site had no Japanese localization, yet memberships had
-to be sold to Japanese companies. We needed to present a localized experience over an
-origin we couldn't change. We took the problem to Webtide, and Greg Wilkins'
+to be sold to Japanese companies. A localized experience was needed over an origin
+that could not be changed. The problem went to Webtide, and Greg Wilkins'
 answer was **jetty-prism**: a streaming proxy, built on Jetty, that rewrote the page
 as it streamed through, translating English to Japanese on the fly. The translation
 map and texts were implemented partly in Groovy, and even strings found inside
