@@ -21,7 +21,7 @@ object Rule {
 
 /**
  * Typed view of the `prism.proxy` config section, plus the byte-flow it implies.
- * This is the whole behaviour of [[ProxyServer]] expressed as data — no CLI flags.
+ * This is the whole behavior of [[ProxyServer]] expressed as data, no CLI flags.
  */
 final case class ProxyConfig(
     interface: String,

@@ -1,4 +1,4 @@
-# prism-stream
+# pekko-prism
 
 **PRISM**: *PRoxy Integrated Service Module*.
 
@@ -38,7 +38,7 @@ map and texts were implemented partly in Groovy, and even strings found inside
 JavaScript were translated. It cost a lot of performance, but it worked, and it ran
 in production until the site shipped native Japanese localization.
 
-**prism-stream is a clean-room reimplementation of that idea on Pekko Streams**: the
+**pekko-prism is a clean-room reimplementation of that idea on Pekko Streams**: the
 concept recalled and rewritten from scratch. Same core: find/replace/inject content
 in a byte stream, even when matches cross chunk boundaries, with backpressure and
 bounded memory. Different substrate, and a few deliberate upgrades that trace
@@ -100,7 +100,7 @@ Http().singleRequest(req).map(RewriteHttp.rewriteResponse(rewriter))
 
 ## Run it as a config-driven proxy
 
-`prism.ProxyServer` is a real Pekko HTTP service whose behaviour comes entirely from a
+`prism.ProxyServer` is a real Pekko HTTP service whose behavior comes entirely from a
 HOCON file (`prism.proxy`), no CLI flags. It adds the production niceties: a health
 endpoint, `X-Forwarded-*`/`Via` headers, `502`/`504` on upstream failure, per-request
 access logs, connection-pool tuning, optional HTTPS, and graceful drain on SIGTERM.

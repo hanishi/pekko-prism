@@ -19,7 +19,7 @@ import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success}
 
 /**
- * Config-driven reverse proxy: a real Pekko HTTP service whose behaviour comes
+ * Config-driven reverse proxy: a real Pekko HTTP service whose behavior comes
  * entirely from a HOCON file (`prism.proxy` section), not CLI flags. See
  * `application.conf` for the schema and `docs/proxy-config.md` for the reference. Run:
  * {{{
