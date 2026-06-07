@@ -138,8 +138,6 @@ strips them, which is for authorized security testing only, never production tra
 ./run-proxy-server.sh proxy.conf          # or: java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
 ```
 
-`ReverseProxy` is a flag-driven CLI variant of the same, handy for quick experiments.
-
 The full configuration reference (every setting, all rule types, how rules combine,
 and worked recipes) is in [`docs/proxy-config.md`](docs/proxy-config.md).
 

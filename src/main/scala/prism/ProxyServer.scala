@@ -27,9 +27,9 @@ import scala.util.{Failure, Success}
  *   java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
  * }}}
  *
- * Production niceties over the [[ReverseProxy]] demo: health endpoint, X-Forwarded-*
- * headers, 502/504 on upstream failure (no leaked stack traces), per-request access
- * logging, and graceful drain on SIGTERM.
+ * Production niceties: health endpoint, X-Forwarded-* headers, 502/504 on upstream
+ * failure (no leaked stack traces), per-request access logging, and graceful drain on
+ * SIGTERM.
  */
 object ProxyServer {
 

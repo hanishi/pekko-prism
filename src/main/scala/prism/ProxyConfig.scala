@@ -42,14 +42,9 @@ final case class ProxyConfig(
   def applyHeaderRules(resp: HttpResponse): HttpResponse = HeaderRule.applyAll(resp, headerRules)
 }
 
-/** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. Shared by
- * the config-driven [[ProxyServer]] and the flag-driven [[ReverseProxy]]. */
+/** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. */
 object RuleFlow {
-  def build(
-      rules: List[Rule],
-      textOnly: Boolean,
-      attrScoped: Boolean = false
-  ): Flow[ByteString, ByteString, ?] = {
+  def build(rules: List[Rule], textOnly: Boolean): Flow[ByteString, ByteString, ?] = {
     val literal = rules.collect { case Rule.Rewrite(f, t) => (f, t) }
     val words   = rules.collect { case Rule.RewriteWord(f, t) => (f, t) }
     val wraps   = rules.collect { case Rule.WrapUrl(a, t) => (a, t) }
@@ -59,17 +54,8 @@ object RuleFlow {
     }
 
     val content = ListBuffer[Rewriter]()
-    if (literal.nonEmpty)
-      content += (
-        if (attrScoped) // --attr: rewrite only URL attribute values, case-insensitively
-          new UrlAttributeRewriter(
-            transform       = v => literal.foldLeft(v) { case (s, (f, t)) => s.replace(f, t) },
-            caseInsensitive = true,
-            decodeEntities  = true
-          )
-        else new LiteralRewriter(literal)
-      )
-    if (words.nonEmpty) content += new WordLiteralRewriter(words)
+    if (literal.nonEmpty) content += new LiteralRewriter(literal)
+    if (words.nonEmpty)   content += new WordLiteralRewriter(words)
 
     // --text confines content rewrites to HTML text nodes; wrap-url and insert are
     // always whole-body (URLs live in attributes/CDATA; insert anchors are markup).
