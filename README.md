@@ -230,3 +230,9 @@ sbt test
   original **jetty-prism**, a streaming localization proxy for the Japanese joint
   venture of a now-giant Chinese tech company's B2B marketplace.
 - **This reimplementation:** clean-room, from scratch, on Apache Pekko Streams.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
+
+Copyright 2026 Programmer LLC.
