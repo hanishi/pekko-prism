@@ -135,7 +135,7 @@ versa. `cookie-flags` enforces flags (a deployable hardening); `http-only = fals
 strips them, which is for authorized security testing only, never production traffic.
 
 ```
-./run-proxy-server.sh proxy.conf          # or: java -Dconfig.file=proxy.conf -cp <cp> prism.ProxyServer
+./run-proxy-server.sh proxy.conf
 ```
 
 The full configuration reference (every setting, all rule types, how rules combine,
