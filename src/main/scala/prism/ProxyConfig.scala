@@ -1,8 +1,7 @@
 package prism
 
 import com.typesafe.config.Config
-import org.apache.pekko.NotUsed
-import org.apache.pekko.http.scaladsl.model.{ContentType, MediaTypes, Uri}
+import org.apache.pekko.http.scaladsl.model.{ContentType, HttpResponse, MediaTypes, Uri}
 import org.apache.pekko.stream.scaladsl.Flow
 import org.apache.pekko.util.ByteString
 import prism.http.RewriteHttp
@@ -10,23 +9,14 @@ import prism.http.RewriteHttp
 import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters.*
 
-/** One declarative rewrite rule from the config file. */
+/** One declarative response-BODY rewrite rule from the config file. */
 sealed trait Rule
 object Rule {
-  case class Rewrite(from: String, to: String)         extends Rule
-  case class RewriteWord(from: String, to: String)     extends Rule
-  case class WrapUrl(anchor: String, template: String) extends Rule
+  case class Rewrite(from: String, to: String)          extends Rule
+  case class RewriteWord(from: String, to: String)      extends Rule
+  case class WrapUrl(anchor: String, template: String)  extends Rule
   case class InsertBefore(anchor: String, html: String) extends Rule
   case class InsertAfter(anchor: String, html: String)  extends Rule
-
-  def from(c: Config): Rule = c.getString("type") match {
-    case "rewrite"       => Rewrite(c.getString("from"), c.getString("to"))
-    case "rewrite-word"  => RewriteWord(c.getString("from"), c.getString("to"))
-    case "wrap-url"      => WrapUrl(c.getString("anchor"), c.getString("template"))
-    case "insert-before" => InsertBefore(c.getString("anchor"), c.getString("html"))
-    case "insert-after"  => InsertAfter(c.getString("anchor"), c.getString("html"))
-    case other           => sys.error(s"unknown rule type: $other")
-  }
 }
 
 /**
@@ -41,11 +31,15 @@ final case class ProxyConfig(
     accept: ContentType => Boolean,
     textOnly: Boolean,
     tls: Option[(String, String)],
-    rules: List[Rule]
+    rules: List[Rule],
+    headerRules: List[HeaderRule]
 ) {
 
   /** Build the response-body rewrite flow these rules describe (identity if none). */
   def rewriteFlow: Flow[ByteString, ByteString, ?] = RuleFlow.build(rules, textOnly)
+
+  /** Apply the structured response-header rules (cookie flags, set/strip header). */
+  def applyHeaderRules(resp: HttpResponse): HttpResponse = HeaderRule.applyAll(resp, headerRules)
 }
 
 /** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. Shared by
@@ -104,16 +98,39 @@ object ProxyConfig {
         Some((tlsCfg.getString("keystore"), tlsCfg.getString("password")))
       else None
 
+    // The `rules` list mixes body rules and header rules; split them by type.
+    val (bodyRules, headerRules) =
+      c.getConfigList("rules").asScala.toList.map(parseEntry).partitionMap(identity)
+
     ProxyConfig(
-      interface  = c.getString("interface"),
-      port       = c.getInt("port"),
-      origin     = Uri(origin),
-      healthPath = c.getString("health-path"),
-      accept     = acceptPredicate(c.getStringList("accept").asScala.toList),
-      textOnly   = c.getBoolean("text-only"),
-      tls        = tls,
-      rules      = c.getConfigList("rules").asScala.toList.map(Rule.from)
+      interface   = c.getString("interface"),
+      port        = c.getInt("port"),
+      origin      = Uri(origin),
+      healthPath  = c.getString("health-path"),
+      accept      = acceptPredicate(c.getStringList("accept").asScala.toList),
+      textOnly    = c.getBoolean("text-only"),
+      tls         = tls,
+      rules       = bodyRules,
+      headerRules = headerRules
     )
+  }
+
+  private def optBool(c: Config, p: String): Option[Boolean] =
+    if (c.hasPath(p)) Some(c.getBoolean(p)) else None
+  private def optStr(c: Config, p: String): Option[String] =
+    if (c.hasPath(p)) Some(c.getString(p)) else None
+
+  /** Parse one config entry into a body rule (Left) or a header rule (Right). */
+  private def parseEntry(c: Config): Either[Rule, HeaderRule] = c.getString("type") match {
+    case "rewrite"       => Left(Rule.Rewrite(c.getString("from"), c.getString("to")))
+    case "rewrite-word"  => Left(Rule.RewriteWord(c.getString("from"), c.getString("to")))
+    case "wrap-url"      => Left(Rule.WrapUrl(c.getString("anchor"), c.getString("template")))
+    case "insert-before" => Left(Rule.InsertBefore(c.getString("anchor"), c.getString("html")))
+    case "insert-after"  => Left(Rule.InsertAfter(c.getString("anchor"), c.getString("html")))
+    case "cookie-flags"  => Right(HeaderRule.CookieFlags(optBool(c, "http-only"), optBool(c, "secure"), optStr(c, "same-site")))
+    case "set-header"    => Right(HeaderRule.SetHeader(c.getString("name"), c.getString("value")))
+    case "strip-header"  => Right(HeaderRule.StripHeader(c.getString("name")))
+    case other           => sys.error(s"unknown rule type: $other")
   }
 
   /** Turn `accept = ["html","xml","text/css","all"]` into a content-type gate. */

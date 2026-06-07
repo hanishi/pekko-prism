@@ -91,6 +91,7 @@ object ProxyServer {
         .map(_.withProtocol(req.protocol)) // serve client's protocol, not origin's (1.0+chunked is illegal)
         .map(RewriteHttp.rewriteResponseWith(rewriteFlow, cfg.accept))
         .map(resp => resp.withHeaders(fwdResponseHeaders(resp.headers)))
+        .map(cfg.applyHeaderRules) // structured header/cookie rules, last (survive header filtering)
         .recover {
           case _: TimeoutException =>
             log.warn("upstream timeout for {}", req.uri.path)
@@ -130,9 +131,9 @@ object ProxyServer {
 
     server.bind(handler).onComplete {
       case Success(binding) =>
-        log.info("prism proxy {}://{}:{}/  ->  {}  ({} rule(s), pool {}/{})",
+        log.info("prism proxy {}://{}:{}/  ->  {}  ({} body + {} header rule(s), pool {}/{})",
           scheme, cfg.interface, cfg.port, cfg.origin,
-          cfg.rules.size, poolSettings.maxConnections, poolSettings.maxOpenRequests)
+          cfg.rules.size, cfg.headerRules.size, poolSettings.maxConnections, poolSettings.maxOpenRequests)
         // Graceful drain on SIGTERM / Ctrl-C: stop accepting, finish in-flight, then exit.
         sys.addShutdownHook {
           log.info("draining…")
