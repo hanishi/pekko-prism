@@ -8,14 +8,16 @@
 # This single-stage variant keeps the runtime image small and matches the common CI
 # pattern (build the artifact, then containerize). For a self-contained build that
 # compiles inside Docker, use a multi-stage build with an sbt base image instead.
-FROM eclipse-temurin:21-jre
+# Distroless: a real JVM (so Pekko works unchanged) on a minimal base with no shell or
+# package manager, which shrinks the image and cuts the CVE/attack surface. Debug with
+# an ephemeral container (kubectl debug / docker run --image=busybox), not `exec sh`.
+FROM gcr.io/distroless/java21-debian12
 
 WORKDIR /app
 COPY target/scala-3.3.4/prism-proxy.jar /app/prism-proxy.jar
 COPY proxy.conf /app/proxy.conf
 
-# Run as a non-root user. eclipse-temurin already provides uid 1000; reuse it
-# (the Kubernetes manifests also pin runAsUser: 1000 / runAsNonRoot).
+# Non-root (numeric uid; matches the manifests' runAsUser: 1000).
 USER 1000
 
 EXPOSE 8080
