@@ -55,5 +55,15 @@ class BmhRewriterSpec extends AnyWordSpec with Matchers {
     "handle a single-byte pattern (degenerates to linear scan)" in {
       oneShot(BmhRewriter("x", "Y"), "axbxc") shouldBe "aYbYc"
     }
+
+    "match non-ASCII (UTF-8 multi-byte) patterns, even split mid-character" in {
+      val jp = BmhRewriter("アパッチ", "APACHE")
+      oneShot(jp, "これはアパッチです、アパッチ！") shouldBe "これはAPACHEです、APACHE！"
+      oneShot(BmhRewriter("Pekko", "ペッコ"), "Apache Pekko rocks") shouldBe "Apache ペッコ rocks"
+      // every byte-split (including inside a 3-byte char) must still match
+      val input    = ByteString("x アパッチ y アパッチ z")
+      val expected = oneShot(jp, input.utf8String)
+      (1 to input.length).foreach(c => stream(jp, input, c) shouldBe expected)
+    }
   }
 }
