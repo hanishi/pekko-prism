@@ -2,6 +2,7 @@ package prism
 
 import com.typesafe.config.Config
 import org.apache.pekko.http.scaladsl.model.{ContentType, HttpRequest, HttpResponse, MediaTypes, Uri}
+import org.apache.pekko.http.scaladsl.model.headers.RawHeader
 import org.apache.pekko.stream.scaladsl.Flow
 import org.apache.pekko.util.ByteString
 import prism.http.RewriteHttp
@@ -34,7 +35,9 @@ final case class ProxyConfig(
     textOnly: Boolean,
     tls: Option[(String, String)],
     scopedRules: List[ScopedRule],
-    scopedHeaderRules: List[ScopedHeaderRule]
+    scopedHeaderRules: List[ScopedHeaderRule],
+    requestBodyRules: List[Rule],
+    requestHeaderRules: List[HeaderRule]
 ) {
 
   /** All body rules, scope aside (the unscoped fast path and tests use this). */
@@ -61,6 +64,30 @@ final case class ProxyConfig(
   def applyHeaderRulesFor(req: HttpRequest, resp: HttpResponse): HttpResponse =
     if (!hasScopes) applyHeaderRules(resp)
     else HeaderRule.applyAll(resp, scopedHeaderRules.filter(_.scope.matches(req)).map(_.rule))
+
+  /** True if any request-side rule is configured. */
+  val hasRequestRules: Boolean = requestBodyRules.nonEmpty || requestHeaderRules.nonEmpty
+
+  /** Body rewrite flow applied to the *request* before forwarding. */
+  def requestRewriteFlow: Flow[ByteString, ByteString, ?] = RuleFlow.build(requestBodyRules, textOnly = false)
+
+  /**
+   * Apply request-side rules to the outgoing request: `set-header`/`strip-header` on the
+   * request headers (`cookie-flags` is response-only and ignored here), and body
+   * `rewrite`/`rewrite-word` on the request entity (gated by `accept`, like responses).
+   */
+  def applyRequestRules(req: HttpRequest): HttpRequest = {
+    if (!hasRequestRules) return req
+    var hs = req.headers
+    requestHeaderRules.foreach {
+      case HeaderRule.SetHeader(n, v) => hs = hs.filterNot(_.lowercaseName == n.toLowerCase) :+ RawHeader(n, v)
+      case HeaderRule.StripHeader(n)  => hs = hs.filterNot(_.lowercaseName == n.toLowerCase)
+      case _: HeaderRule.CookieFlags  => // not applicable to a request
+    }
+    val withHeaders = req.withHeaders(hs)
+    if (requestBodyRules.isEmpty || !accept(req.entity.contentType)) withHeaders
+    else withHeaders.withEntity(withHeaders.entity.transformDataBytes(requestRewriteFlow))
+  }
 }
 
 /** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. */
@@ -116,18 +143,24 @@ object ProxyConfig {
         }
       }.partitionMap(identity)
 
+    // Request-side rules (applied to the outgoing request); unscoped, body + header.
+    val (reqBody, reqHeader) =
+      c.getConfigList("request-rules").asScala.toList.map(parseEntry).partitionMap(identity)
+
     ProxyConfig(
-      interface         = c.getString("interface"),
-      port              = c.getInt("port"),
-      origin            = Uri(origin),
-      healthPath        = c.getString("health-path"),
-      metricsPath       = Some(c.getString("metrics-path")).filter(_.nonEmpty),
-      reload            = c.getBoolean("reload"),
-      accept            = acceptPredicate(c.getStringList("accept").asScala.toList),
-      textOnly          = c.getBoolean("text-only"),
-      tls               = tls,
-      scopedRules       = bodyRules,
-      scopedHeaderRules = headerRules
+      interface          = c.getString("interface"),
+      port               = c.getInt("port"),
+      origin             = Uri(origin),
+      healthPath         = c.getString("health-path"),
+      metricsPath        = Some(c.getString("metrics-path")).filter(_.nonEmpty),
+      reload             = c.getBoolean("reload"),
+      accept             = acceptPredicate(c.getStringList("accept").asScala.toList),
+      textOnly           = c.getBoolean("text-only"),
+      tls                = tls,
+      scopedRules        = bodyRules,
+      scopedHeaderRules  = headerRules,
+      requestBodyRules   = reqBody,
+      requestHeaderRules = reqHeader
     )
   }
 

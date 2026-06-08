@@ -93,9 +93,10 @@ object ProxyServer {
       HttpResponse(status, entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, msg + "\n"))
 
     def proxy(req: HttpRequest, cfg: ProxyConfig): Future[HttpResponse] = {
+      val ruled    = cfg.applyRequestRules(req) // request-side header/body rules before forwarding
       val withPath = cfg.origin.withPath(req.uri.path)
       val target   = req.uri.rawQueryString.fold(withPath)(withPath.withRawQueryString)
-      val outgoing = req.withUri(target).withHeaders(fwdRequestHeaders(req.headers) ++ forwardedHeaders(req, cfg))
+      val outgoing = ruled.withUri(target).withHeaders(fwdRequestHeaders(ruled.headers) ++ forwardedHeaders(req, cfg))
       val flow     = if (cfg.hasScopes) cfg.rewriteFlowFor(req) else flowFor(cfg)
 
       Http()

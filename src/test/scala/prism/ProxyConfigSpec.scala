@@ -150,6 +150,35 @@ class ProxyConfigSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
+  "ProxyConfig.applyRequestRules" should {
+    "set/strip request headers and rewrite the request body" in {
+      val c = parse("""prism.proxy {
+        origin = "http://u"
+        request-rules = [
+          { type = set-header,   name = "X-Api-Key", value = "secret" }
+          { type = strip-header, name = "X-Drop" }
+          { type = rewrite,      from = "internal", to = "EXTERNAL" }
+        ]
+      }""")
+      c.hasRequestRules shouldBe true
+      val req = HttpRequest(
+        headers = List(RawHeader("X-Drop", "v")),
+        entity  = HttpEntity(ContentTypes.`text/html(UTF-8)`, "internal")
+      )
+      val out = c.applyRequestRules(req)
+      out.headers.exists(h => h.name == "X-Api-Key" && h.value == "secret") shouldBe true
+      out.headers.exists(_.lowercaseName == "x-drop")                       shouldBe false
+      Await.result(out.entity.toStrict(5.seconds), 5.seconds).data.utf8String shouldBe "EXTERNAL"
+    }
+
+    "be a no-op when there are no request rules" in {
+      val c   = parse("""prism.proxy { origin = "http://u" }""")
+      val req = HttpRequest(uri = "/x")
+      c.hasRequestRules         shouldBe false
+      c.applyRequestRules(req)  shouldBe req
+    }
+  }
+
   "ProxyConfig.applyHeaderRules" should {
     "enforce cookie flags and strip a header" in {
       val c = parse("""prism.proxy {

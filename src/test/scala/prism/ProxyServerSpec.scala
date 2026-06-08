@@ -108,6 +108,22 @@ class ProxyServerSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
+  "ProxyServer with request rules" should {
+    "apply a set-header to the request that reaches the origin" in {
+      val cfg = ProxyConfig.from(
+        ConfigFactory.parseString(s"""prism.proxy {
+          origin = "http://127.0.0.1:${origin.localAddress.getPort}"
+          request-rules = [ { type = set-header, name = "X-Api-Key", value = "secret" } ]
+        }""").withFallback(ConfigFactory.load()).resolve().getConfig("prism.proxy")
+      )
+      val b = Await.result(Http().newServerAt("127.0.0.1", 0).bind(ProxyServer.buildHandler(cfg)), 5.seconds)
+      val r = Await.result(
+        Http().singleRequest(HttpRequest(uri = s"http://127.0.0.1:${b.localAddress.getPort}/headers")), 5.seconds)
+      body(r) should include ("X-Api-Key: secret")
+      Await.result(b.unbind(), 5.seconds)
+    }
+  }
+
   "ProxyServer with a dead origin" should {
     "return 502 Bad Gateway, not a 500" in {
       val cfg = ProxyConfig.from(
