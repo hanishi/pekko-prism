@@ -82,13 +82,16 @@ exceeds the longest pattern, so memory stays bounded no matter how the stream is
 
 ### Rewriters
 
-| Rewriter                                       | What it does                                                                                                     |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `LiteralRewriter`                              | multi-pattern literal `from -> to` (whole body)                                                                  |
-| `WordLiteralRewriter`                          | same, but only on whole words (`head` is not `header`/`ahead`)                                                   |
-| `UrlAttributeRewriter`                         | rewrite only HTML attribute *values* (`href`, `src`, …); case-insensitive, entity-decoding                       |
-| `TokenRewriter`                                | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there |
-| `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments  |
+The concrete `Rewriter` building blocks. Use them directly via `RewriteFlow(rewriter)`,
+or let the config `rules` (`rewrite`, `rewrite-word`, `wrap-url`, …) map onto them.
+
+| Rewriter                                       | What it does                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LiteralRewriter`                              | multi-pattern literal `from -> to` (whole body); matched by BMH / Wu-Manber / Aho-Corasick automatically (see [Performance](#performance)) |
+| `WordLiteralRewriter`                          | same, but only on whole words (`head` is not `header`/`ahead`)                                                                             |
+| `UrlAttributeRewriter`                         | rewrite only HTML attribute *values* (`href`, `src`, …); case-insensitive, entity-decoding                                                 |
+| `TokenRewriter`                                | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there                           |
+| `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments                            |
 
 ## Use it from Pekko HTTP
 
