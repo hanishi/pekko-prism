@@ -7,11 +7,14 @@ import org.apache.pekko.http.scaladsl.model.*
 import org.apache.pekko.http.scaladsl.model.headers.RawHeader
 import org.apache.pekko.http.scaladsl.settings.ConnectionPoolSettings
 import org.apache.pekko.http.scaladsl.{ConnectionContext, Http, HttpsConnectionContext}
+import org.apache.pekko.stream.scaladsl.Flow
+import org.apache.pekko.util.ByteString
 import prism.http.RewriteHttp
 
 import java.io.{File, FileInputStream}
 import java.security.{KeyStore, SecureRandom}
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.{KeyManagerFactory, SSLContext}
 import scala.collection.immutable
 import scala.concurrent.duration.*
@@ -42,12 +45,26 @@ object ProxyServer {
    * add forwarding headers, answer the health path, and map upstream failures to
    * 502/504. Exposed (rather than inlined in [[main]]) so it can be tested directly.
    */
-  def buildHandler(cfg: ProxyConfig, metrics: Metrics = new Metrics())(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] = {
+  def buildHandler(cfg: ProxyConfig, metrics: Metrics = new Metrics())(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] =
+    handlerFor(() => cfg, metrics)
+
+  /**
+   * Core handler over a config *supplier*, read fresh on every request so a hot reload
+   * (see [[main]]) takes effect without rebinding. The derived rewrite flow is cached
+   * and rebuilt only when the config instance changes.
+   */
+  private[prism] def handlerFor(current: () => ProxyConfig, metrics: Metrics)(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] = {
     import system.executionContext
     val log          = org.slf4j.LoggerFactory.getLogger("prism.proxy")
     val poolSettings = ConnectionPoolSettings(system)
-    val rewriteFlow  = cfg.rewriteFlow
-    val scheme       = if (cfg.tls.isDefined) "https" else "http"
+    val scheme       = if (current().tls.isDefined) "https" else "http" // TLS is fixed at startup
+
+    val flowCache = new AtomicReference[(ProxyConfig, Flow[ByteString, ByteString, ?])]()
+    def flowFor(cfg: ProxyConfig): Flow[ByteString, ByteString, ?] = {
+      val c = flowCache.get()
+      if (c != null && (c._1 eq cfg)) c._2
+      else { val f = cfg.rewriteFlow; flowCache.set((cfg, f)); f }
+    }
 
     def keep(h: HttpHeader, rendersHere: Boolean, more: String => Boolean): Boolean =
       rendersHere && !hopByHop(h.lowercaseName) && more(h.lowercaseName)
@@ -58,7 +75,7 @@ object ProxyServer {
     def fwdResponseHeaders(hs: immutable.Seq[HttpHeader]): immutable.Seq[HttpHeader] =
       hs.filter(h => keep(h, h.renderInResponses(), _ => true))
 
-    def forwardedHeaders(req: HttpRequest): List[HttpHeader] = {
+    def forwardedHeaders(req: HttpRequest, cfg: ProxyConfig): List[HttpHeader] = {
       val clientIp = req.attribute(AttributeKeys.remoteAddress).flatMap(_.toOption).map(_.getHostAddress)
       val priorXff = req.headers.collectFirst { case h if h.lowercaseName == "x-forwarded-for" => h.value }
       val xff      = (priorXff.toList ++ clientIp.toList).mkString(", ")
@@ -75,15 +92,15 @@ object ProxyServer {
     def errorResponse(status: StatusCode, msg: String): HttpResponse =
       HttpResponse(status, entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, msg + "\n"))
 
-    def proxy(req: HttpRequest): Future[HttpResponse] = {
+    def proxy(req: HttpRequest, cfg: ProxyConfig): Future[HttpResponse] = {
       val withPath = cfg.origin.withPath(req.uri.path)
       val target   = req.uri.rawQueryString.fold(withPath)(withPath.withRawQueryString)
-      val outgoing = req.withUri(target).withHeaders(fwdRequestHeaders(req.headers) ++ forwardedHeaders(req))
+      val outgoing = req.withUri(target).withHeaders(fwdRequestHeaders(req.headers) ++ forwardedHeaders(req, cfg))
 
       Http()
         .singleRequest(outgoing, settings = poolSettings)
         .map(_.withProtocol(req.protocol)) // serve client's protocol, not origin's (1.0+chunked is illegal)
-        .map(RewriteHttp.rewriteResponseWith(rewriteFlow, cfg.accept))
+        .map(RewriteHttp.rewriteResponseWith(flowFor(cfg), cfg.accept))
         .map(resp => resp.withHeaders(fwdResponseHeaders(resp.headers)))
         .map(cfg.applyHeaderRules) // structured header/cookie rules, last (survive header filtering)
         .recover {
@@ -97,6 +114,7 @@ object ProxyServer {
     }
 
     req => {
+      val cfg   = current()
       val start = System.nanoTime()
       val path  = req.uri.path.toString
       val result =
@@ -105,7 +123,7 @@ object ProxyServer {
         else if (cfg.metricsPath.contains(path))
           Future.successful(HttpResponse(StatusCodes.OK,
             entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, metrics.render())))
-        else proxy(req)
+        else proxy(req, cfg)
       result.map { resp =>
         val nanos = System.nanoTime() - start
         log.info("{} {} -> {} {}ms", req.method.value, req.uri.path, resp.status.intValue, nanos / 1000000)
@@ -127,6 +145,31 @@ object ProxyServer {
     ConnectionContext.httpsServer(ctx)
   }
 
+  /** Poll the config file's mtime and hot-swap the live config when it changes. */
+  private def startConfigWatcher(path: String, cfgRef: AtomicReference[ProxyConfig], log: org.slf4j.Logger): Unit = {
+    val file = new File(path)
+    val t = new Thread(() => {
+      var last = file.lastModified()
+      while (!Thread.currentThread().isInterrupted) {
+        try Thread.sleep(3000) catch { case _: InterruptedException => return }
+        val now = file.lastModified()
+        if (now != 0L && now != last) {
+          last = now
+          try {
+            val parsed = ConfigFactory.parseFile(file).withFallback(ConfigFactory.load()).resolve().getConfig("prism.proxy")
+            val next   = ProxyConfig.from(parsed)
+            cfgRef.set(next)
+            log.info("config reloaded from {} ({} body + {} header rule(s))", path, next.rules.size, next.headerRules.size)
+          } catch {
+            case e: Throwable => log.warn("config reload failed, keeping previous config: {}", e.getMessage)
+          }
+        }
+      }
+    }, "prism-config-watcher")
+    t.setDaemon(true)
+    t.start()
+  }
+
   def main(args: Array[String]): Unit = {
     // Load config: explicit file arg, else standard ConfigFactory (honours -Dconfig.file).
     val config = args.headOption match {
@@ -134,7 +177,8 @@ object ProxyServer {
         ConfigFactory.parseFile(new File(path)).withFallback(ConfigFactory.load()).resolve()
       case None => ConfigFactory.load()
     }
-    val cfg = ProxyConfig.from(config.getConfig("prism.proxy"))
+    val cfg    = ProxyConfig.from(config.getConfig("prism.proxy"))
+    val cfgRef = new AtomicReference(cfg)
 
     implicit val system: ActorSystem[Nothing] =
       ActorSystem(Behaviors.empty, "prism-proxy", config)
@@ -143,14 +187,18 @@ object ProxyServer {
     val poolSettings = ConnectionPoolSettings(system)
     val scheme       = if (cfg.tls.isDefined) "https" else "http"
 
+    // Hot reload: if enabled and started from a file, watch it and swap the live config.
+    args.headOption.filter(_ => cfg.reload).foreach(startConfigWatcher(_, cfgRef, log))
+
     val serverAt = Http().newServerAt(cfg.interface, cfg.port)
     val server   = httpsContext(cfg).fold(serverAt)(serverAt.enableHttps)
 
-    server.bind(buildHandler(cfg)).onComplete {
+    server.bind(handlerFor(() => cfgRef.get, new Metrics())).onComplete {
       case Success(binding) =>
-        log.info("prism proxy {}://{}:{}/  ->  {}  ({} body + {} header rule(s), pool {}/{})",
+        log.info("prism proxy {}://{}:{}/  ->  {}  ({} body + {} header rule(s), pool {}/{}{})",
           scheme, cfg.interface, cfg.port, cfg.origin,
-          cfg.rules.size, cfg.headerRules.size, poolSettings.maxConnections, poolSettings.maxOpenRequests)
+          cfg.rules.size, cfg.headerRules.size, poolSettings.maxConnections, poolSettings.maxOpenRequests,
+          if (cfg.reload) ", hot-reload on" else "")
         // Graceful drain on SIGTERM / Ctrl-C: stop accepting, finish in-flight, then exit.
         sys.addShutdownHook {
           log.info("draining…")
