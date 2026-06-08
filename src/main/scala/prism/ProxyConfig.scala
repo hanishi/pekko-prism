@@ -1,7 +1,7 @@
 package prism
 
 import com.typesafe.config.Config
-import org.apache.pekko.http.scaladsl.model.{ContentType, HttpResponse, MediaTypes, Uri}
+import org.apache.pekko.http.scaladsl.model.{ContentType, HttpRequest, HttpResponse, MediaTypes, Uri}
 import org.apache.pekko.stream.scaladsl.Flow
 import org.apache.pekko.util.ByteString
 import prism.http.RewriteHttp
@@ -33,15 +33,34 @@ final case class ProxyConfig(
     accept: ContentType => Boolean,
     textOnly: Boolean,
     tls: Option[(String, String)],
-    rules: List[Rule],
-    headerRules: List[HeaderRule]
+    scopedRules: List[ScopedRule],
+    scopedHeaderRules: List[ScopedHeaderRule]
 ) {
 
-  /** Build the response-body rewrite flow these rules describe (identity if none). */
+  /** All body rules, scope aside (the unscoped fast path and tests use this). */
+  def rules: List[Rule] = scopedRules.map(_.rule)
+
+  /** All header rules, scope aside. */
+  def headerRules: List[HeaderRule] = scopedHeaderRules.map(_.rule)
+
+  /** True if any rule is restricted to a [[Scope]]; if not, the flow is request-independent. */
+  val hasScopes: Boolean = (scopedRules.map(_.scope) ++ scopedHeaderRules.map(_.scope)).exists(_ != Scope.any)
+
+  /** The response-body rewrite flow for all rules (request-independent; identity if none). */
   def rewriteFlow: Flow[ByteString, ByteString, ?] = RuleFlow.build(rules, textOnly)
 
-  /** Apply the structured response-header rules (cookie flags, set/strip header). */
+  /** The response-body rewrite flow for the rules whose scope matches `req`. */
+  def rewriteFlowFor(req: HttpRequest): Flow[ByteString, ByteString, ?] =
+    if (!hasScopes) rewriteFlow
+    else RuleFlow.build(scopedRules.filter(_.scope.matches(req)).map(_.rule), textOnly)
+
+  /** Apply all response-header rules (request-independent). */
   def applyHeaderRules(resp: HttpResponse): HttpResponse = HeaderRule.applyAll(resp, headerRules)
+
+  /** Apply the response-header rules whose scope matches `req`. */
+  def applyHeaderRulesFor(req: HttpRequest, resp: HttpResponse): HttpResponse =
+    if (!hasScopes) applyHeaderRules(resp)
+    else HeaderRule.applyAll(resp, scopedHeaderRules.filter(_.scope.matches(req)).map(_.rule))
 }
 
 /** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. */
@@ -86,24 +105,39 @@ object ProxyConfig {
         Some((tlsCfg.getString("keystore"), tlsCfg.getString("password")))
       else None
 
-    // The `rules` list mixes body rules and header rules; split them by type.
+    // The `rules` list mixes body rules and header rules (each optionally `when`-scoped);
+    // split them by type, carrying each rule's scope.
     val (bodyRules, headerRules) =
-      c.getConfigList("rules").asScala.toList.map(parseEntry).partitionMap(identity)
+      c.getConfigList("rules").asScala.toList.map { e =>
+        val scope = parseScope(e)
+        parseEntry(e) match {
+          case Left(r)  => Left(ScopedRule(r, scope))
+          case Right(h) => Right(ScopedHeaderRule(h, scope))
+        }
+      }.partitionMap(identity)
 
     ProxyConfig(
-      interface   = c.getString("interface"),
-      port        = c.getInt("port"),
-      origin      = Uri(origin),
-      healthPath  = c.getString("health-path"),
-      metricsPath = Some(c.getString("metrics-path")).filter(_.nonEmpty),
-      reload      = c.getBoolean("reload"),
-      accept      = acceptPredicate(c.getStringList("accept").asScala.toList),
-      textOnly    = c.getBoolean("text-only"),
-      tls         = tls,
-      rules       = bodyRules,
-      headerRules = headerRules
+      interface         = c.getString("interface"),
+      port              = c.getInt("port"),
+      origin            = Uri(origin),
+      healthPath        = c.getString("health-path"),
+      metricsPath       = Some(c.getString("metrics-path")).filter(_.nonEmpty),
+      reload            = c.getBoolean("reload"),
+      accept            = acceptPredicate(c.getStringList("accept").asScala.toList),
+      textOnly          = c.getBoolean("text-only"),
+      tls               = tls,
+      scopedRules       = bodyRules,
+      scopedHeaderRules = headerRules
     )
   }
+
+  /** Parse an optional `when { path, host, method }` scope on a rule entry. */
+  private def parseScope(c: Config): Scope =
+    if (!c.hasPath("when")) Scope.any
+    else {
+      val w = c.getConfig("when")
+      Scope(optStr(w, "path"), optStr(w, "host"), optStr(w, "method"))
+    }
 
   private def optBool(c: Config, p: String): Option[Boolean] =
     if (c.hasPath(p)) Some(c.getBoolean(p)) else None

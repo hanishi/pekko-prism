@@ -132,6 +132,24 @@ class ProxyConfigSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
+  "ProxyConfig scoped rules" should {
+    def runFor(c: ProxyConfig, req: HttpRequest, in: String): String =
+      Await.result(
+        Source.single(ByteString(in)).via(c.rewriteFlowFor(req)).runFold(ByteString.empty)(_ ++ _),
+        5.seconds
+      ).utf8String
+
+    "apply a `when`-scoped rule only on matching requests" in {
+      val c = parse("""prism.proxy {
+        origin = "http://u"
+        rules = [ { type = rewrite, from = "internal", to = "EXTERNAL", when { path = "/api/*" } } ]
+      }""")
+      c.hasScopes shouldBe true
+      runFor(c, HttpRequest(uri = "/api/x"), "internal") shouldBe "EXTERNAL" // in scope
+      runFor(c, HttpRequest(uri = "/home"),  "internal") shouldBe "internal" // out of scope: untouched
+    }
+  }
+
   "ProxyConfig.applyHeaderRules" should {
     "enforce cookie flags and strip a header" in {
       val c = parse("""prism.proxy {

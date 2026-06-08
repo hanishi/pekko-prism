@@ -96,13 +96,14 @@ object ProxyServer {
       val withPath = cfg.origin.withPath(req.uri.path)
       val target   = req.uri.rawQueryString.fold(withPath)(withPath.withRawQueryString)
       val outgoing = req.withUri(target).withHeaders(fwdRequestHeaders(req.headers) ++ forwardedHeaders(req, cfg))
+      val flow     = if (cfg.hasScopes) cfg.rewriteFlowFor(req) else flowFor(cfg)
 
       Http()
         .singleRequest(outgoing, settings = poolSettings)
         .map(_.withProtocol(req.protocol)) // serve client's protocol, not origin's (1.0+chunked is illegal)
-        .map(RewriteHttp.rewriteResponseWith(flowFor(cfg), cfg.accept))
+        .map(RewriteHttp.rewriteResponseWith(flow, cfg.accept))
         .map(resp => resp.withHeaders(fwdResponseHeaders(resp.headers)))
-        .map(cfg.applyHeaderRules) // structured header/cookie rules, last (survive header filtering)
+        .map(resp => cfg.applyHeaderRulesFor(req, resp)) // structured header/cookie rules, last
         .recover {
           case _: TimeoutException =>
             log.warn("upstream timeout for {}", req.uri.path)
