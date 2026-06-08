@@ -242,17 +242,24 @@ a 10-core Apple Silicon machine, JDK 21, driving a ~1 MB body in 8 KB chunks:
 | -------------------------------------- | --------- | ------- | ----------- |
 | `LiteralRewriter` (Aho-Corasick)       | ~205      | 4.6     | 4842 ± 56   |
 | `BmhRewriter` (single pattern)         | ~1940     | 0.5     | 540 ± 29    |
+| `WuManberRewriter` (multi-pattern)     | ~915      | 1.1     | 1146 ± 25   |
 | `WordLiteralRewriter`                  | ~185      | 5.2     | 5450 ± 88   |
 | `TokenRewriter` (capture + url-encode) | ~130      | 7.3     | 7628 ± 145  |
 | `LiteralRewriter` via `RewriteFlow`    | ~200      | 4.8     | 4986 ± 321  |
 | HTML text-node tokenizer (via Flow)    | ~110      | 8.9     | 9360 ± 459  |
 
-**Matcher auto-dispatch.** A single `rewrite` rule uses Boyer-Moore-Horspool, which
-skips ahead on the bad-character rule and runs ~9x faster than Aho-Corasick on a sparse
-pattern (540 vs 5020 µs on the same 1 MB body). Multiple rules fall back to Aho-Corasick,
-which matches the whole set in one O(n) pass. No-match chunks pass through as a zero-copy
-slice. The engine picks per config; the output is identical either way (verified at every
-chunk boundary, including mid-character splits in UTF-8).
+**Matcher auto-dispatch.** The engine picks the fastest correct matcher per config:
+
+- **one** `rewrite` rule -> Boyer-Moore-Horspool, ~9x over Aho-Corasick on a sparse
+  pattern (540 vs 5020 µs on the same 1 MB body);
+- **several independent** rules (no pattern a substring of another) -> Wu-Manber, a
+  block-skip multi-pattern Boyer-Moore, ~4x over Aho-Corasick (1146 vs 4918 µs);
+- **anything else** (a pattern contained in another, or a 1-byte pattern) -> Aho-Corasick,
+  one guaranteed O(n) pass.
+
+No-match chunks pass through as a zero-copy slice. Output is identical across all three
+(verified at every chunk boundary, including mid-character splits in UTF-8); the skip
+matchers are chosen only when their selection provably matches Aho-Corasick's.
 
 The `RewriteFlow` figure tracks the raw `apply` figure, so Pekko Streams adds
 essentially no overhead. O(n) time, **constant memory** (no full-body buffering). For
