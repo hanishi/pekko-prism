@@ -120,7 +120,13 @@ object ProxyServer {
       val start = System.nanoTime()
       val path  = req.uri.path.toString
       val result =
-        if (path == cfg.healthPath)
+        if (cfg.handleOptions && req.method == HttpMethods.OPTIONS)
+          Future.successful(HttpResponse(StatusCodes.NoContent, headers = List(
+            RawHeader("Allow", "GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS"),
+            RawHeader("Access-Control-Allow-Origin", "*"),
+            RawHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS"),
+            RawHeader("Access-Control-Allow-Headers", "*"))))
+        else if (path == cfg.healthPath)
           Future.successful(HttpResponse(StatusCodes.OK, entity = "ok\n"))
         else if (cfg.metricsPath.contains(path))
           Future.successful(HttpResponse(StatusCodes.OK,

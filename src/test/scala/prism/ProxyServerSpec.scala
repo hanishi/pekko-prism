@@ -124,6 +124,24 @@ class ProxyServerSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
     }
   }
 
+  "ProxyServer with handle-options" should {
+    "answer OPTIONS with 204 + CORS instead of forwarding to the origin" in {
+      val cfg = ProxyConfig.from(
+        ConfigFactory.parseString(s"""prism.proxy {
+          origin = "http://127.0.0.1:${origin.localAddress.getPort}"
+          handle-options = true
+        }""").withFallback(ConfigFactory.load()).resolve().getConfig("prism.proxy")
+      )
+      val b = Await.result(Http().newServerAt("127.0.0.1", 0).bind(ProxyServer.buildHandler(cfg)), 5.seconds)
+      val r = Await.result(
+        Http().singleRequest(HttpRequest(method = HttpMethods.OPTIONS,
+          uri = s"http://127.0.0.1:${b.localAddress.getPort}/anything")), 5.seconds)
+      r.status shouldBe StatusCodes.NoContent
+      r.headers.exists(_.lowercaseName == "access-control-allow-origin") shouldBe true
+      Await.result(b.unbind(), 5.seconds)
+    }
+  }
+
   "ProxyServer with a dead origin" should {
     "return 502 Bad Gateway, not a 500" in {
       val cfg = ProxyConfig.from(

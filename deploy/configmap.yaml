@@ -9,12 +9,10 @@ data:
   proxy.conf: |
     prism.proxy {
       port   = 8080
-      origin = "http://upstream.default.svc.cluster.local"
+      origin = "https://pekko.apache.org/"
       accept = ["html"]
       rules = [
-        { type = cookie-flags, http-only = true, secure = true, same-site = "Lax" }
-        { type = set-header,   name = "Content-Security-Policy", value = "default-src 'self'" }
-        { type = strip-header, name = "X-Powered-By" }
+        { type = rewrite, from = "Apache Pekko", to = "アパッチ・ペッコ"}
       ]
     }
-    pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512 }
+        pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512 }
