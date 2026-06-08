@@ -39,16 +39,16 @@ localization.
 concept recalled and rebuilt from scratch, with a few upgrades that trace back to where
 the original hurt:
 
-| Concern                          | `jetty-prism` (Jetty 7/8 era)           | here (Pekko)                                               |
-| -------------------------------- | --------------------------------------- | ---------------------------------------------------------- |
-| Rewriting / translation map      | partly Groovy                           | typed Scala, single-pass automaton                         |
-| Performance                      | Groovy + translate-everything, slow     | JVM + Aho-Corasick (~210 MB/s/core)                        |
-| Text inside `<script>`/`<style>` | translated blindly                      | **optional**: skip with the HTML tokenizer, or rewrite all |
-| Multi-pattern match              | Rabin-Karp, length-grouped              | Aho-Corasick (tighter carry bound, linear)                 |
-| Chunk carry-over                 | dual `b0`/`b1` buffers, manual indexing | one `carry: ByteString` prepended to the next chunk        |
-| "need more bytes"                | `replace()==null` then break            | smaller `consumed`; the tail stays in carry                |
-| Flush at end                     | `flush()`                               | `onUpstreamFinish` with `atEOF=true`                       |
-| Backpressure                     | hand-rolled `_skip` counter             | free, from Pekko Streams demand                            |
+| Concern                          | `jetty-prism` (Jetty 7/8 era)                   | here (Pekko)                                                    |
+| -------------------------------- | ----------------------------------------------- | --------------------------------------------------------------- |
+| Rewriting / translation map      | partly Groovy                                   | typed Scala, single-pass automaton                              |
+| Performance                      | Groovy + translate-everything, slow             | JVM; BMH / Wu-Manber / Aho-Corasick dispatch (~210 MB/s and up) |
+| Text inside `<script>`/`<style>` | translated blindly                              | **optional**: skip with the HTML tokenizer, or rewrite all      |
+| Multi-pattern match              | Rabin-Karp; Boyer-Moore for close/postfix scans | Aho-Corasick, or BMH / Wu-Manber skip-dispatch                  |
+| Chunk carry-over                 | dual `b0`/`b1` buffers, manual indexing         | one `carry: ByteString` prepended to the next chunk             |
+| "need more bytes"                | `replace()==null` then break                    | smaller `consumed`; the tail stays in carry                     |
+| Flush at end                     | `flush()`                                       | `onUpstreamFinish` with `atEOF=true`                            |
+| Backpressure                     | hand-rolled `_skip` counter                     | free, from Pekko Streams demand                                 |
 
 > Credit for the original concept: **Greg Wilkins / Webtide**. This implementation
 > shares none of the original code; it was rebuilt from the concept.
