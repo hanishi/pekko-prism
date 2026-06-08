@@ -42,7 +42,7 @@ object ProxyServer {
    * add forwarding headers, answer the health path, and map upstream failures to
    * 502/504. Exposed (rather than inlined in [[main]]) so it can be tested directly.
    */
-  def buildHandler(cfg: ProxyConfig)(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] = {
+  def buildHandler(cfg: ProxyConfig, metrics: Metrics = new Metrics())(using system: ActorSystem[?]): HttpRequest => Future[HttpResponse] = {
     import system.executionContext
     val log          = org.slf4j.LoggerFactory.getLogger("prism.proxy")
     val poolSettings = ConnectionPoolSettings(system)
@@ -98,13 +98,18 @@ object ProxyServer {
 
     req => {
       val start = System.nanoTime()
+      val path  = req.uri.path.toString
       val result =
-        if (req.uri.path.toString == cfg.healthPath)
+        if (path == cfg.healthPath)
           Future.successful(HttpResponse(StatusCodes.OK, entity = "ok\n"))
+        else if (cfg.metricsPath.contains(path))
+          Future.successful(HttpResponse(StatusCodes.OK,
+            entity = HttpEntity(ContentTypes.`text/plain(UTF-8)`, metrics.render())))
         else proxy(req)
       result.map { resp =>
-        val ms = (System.nanoTime() - start) / 1000000
-        log.info("{} {} -> {} {}ms", req.method.value, req.uri.path, resp.status.intValue, ms)
+        val nanos = System.nanoTime() - start
+        log.info("{} {} -> {} {}ms", req.method.value, req.uri.path, resp.status.intValue, nanos / 1000000)
+        if (!cfg.metricsPath.contains(path)) metrics.record(resp.status.intValue, nanos / 1e9)
         resp
       }
     }

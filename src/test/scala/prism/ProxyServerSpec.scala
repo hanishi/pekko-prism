@@ -97,6 +97,15 @@ class ProxyServerSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
       c.secure   shouldBe true
       r.headers.exists(_.lowercaseName == "x-powered-by") shouldBe false
     }
+
+    "expose Prometheus metrics at the metrics path" in {
+      call("/")                       // record at least one proxied request
+      val r = call("/metrics")
+      r.status shouldBe StatusCodes.OK
+      val out = body(r)
+      out should include ("# TYPE prism_requests_total counter")
+      out should include ("prism_request_duration_seconds_count")
+    }
   }
 
   "ProxyServer with a dead origin" should {
