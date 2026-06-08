@@ -155,31 +155,47 @@ and worked recipes) is in [`docs/proxy-config.md`](docs/proxy-config.md).
 
 ## Deploy (Docker / Kubernetes)
 
-A fat jar + container, ready for K8s: the proxy already exposes `/healthz`, drains
-in-flight requests on SIGTERM, logs to stdout, and reads its config from a file.
+A prebuilt distroless image is published at `docker.io/hanishi/pekko-prism:latest`, and
+`deploy/` already points at it, so a deploy is two steps:
 
 ```
-sbt assembly                              # -> target/scala-3.3.4/prism-proxy.jar
-docker build -t prism-proxy:latest .
-kind load docker-image prism-proxy:latest # local cluster only (see below)
+# 1. tailor deploy/configmap.yaml: set `origin` and your `rules`
 kubectl apply -f deploy/                  # ConfigMap + Deployment + Service
 ```
 
-The image is **distroless** (`gcr.io/distroless/java21-debian12`): ~237 MB, a real
-JVM on a minimal base with no shell or package manager, which shrinks the image and
-cuts the CVE/attack surface. Because there is no shell, debug with an ephemeral
-container (`kubectl debug -it <pod> --image=busybox`), not `kubectl exec -- sh`.
+The image is generic and carries **no** origin or rules, so it does nothing useful
+until you supply them: edit `deploy/configmap.yaml` (mounted at `/config/proxy.conf`)
+with your upstream `origin` and the `rules` you want. The proxy is config-driven, so
+the image is the same for everyone; only the ConfigMap differs.
 
-For a **local** cluster the image must be made available to the nodes first, since
-they don't share the host's docker images: `kind load docker-image prism-proxy:latest`
-(kind/Docker Desktop), `minikube image load …`, or push to a registry the cluster can
-reach. Skipping this gives `ImagePullBackOff`.
+To build and publish your **own** image instead of the prebuilt one:
 
-`deploy/` wires the config in as a `ConfigMap` (mounted at `/config/proxy.conf`), with
+```
+sbt assembly                              # -> target/scala-3.3.4/prism-proxy.jar
+docker build -t <you>/pekko-prism:latest .
+docker push  <you>/pekko-prism:latest     # then set that in deploy/deployment.yaml
+```
+
+(For a local-only image, load it into the cluster nodes with `kind load docker-image …`
+/ `minikube image load …` instead of pushing, or you get `ImagePullBackOff`.)
+
+The image is **distroless** (`gcr.io/distroless/java21-debian12`): ~237 MB, a real JVM
+on a minimal base with no shell or package manager, which cuts the CVE/attack surface.
+Because there is no shell, debug with an ephemeral container
+(`kubectl debug -it <pod> --image=busybox`), not `kubectl exec -- sh`.
+
+`deploy/` mounts the config as a `ConfigMap` at `/config/proxy.conf`, with
 `readiness`/`liveness` probes on `/healthz` and `terminationGracePeriodSeconds: 30`
-(longer than the proxy's 10s drain). Front it with an Ingress to terminate TLS, or set
-the config's `tls {}` block to serve HTTPS directly. Config changes need a
-`kubectl rollout restart` (the proxy reads config at startup).
+(longer than the proxy's 10s drain). Config changes need a `kubectl rollout restart`
+(the proxy reads config at startup).
+
+**TLS / certificates.** For real certs, terminate TLS at an **Ingress** with
+**cert-manager** (Let's Encrypt or your CA) and run the proxy plain HTTP behind it: the
+cert is issued and rotated for you, and nothing sensitive sits in the pod. `deploy/` is
+wired for this model. To have the proxy terminate TLS itself (the config's `tls {}`
+block), mount the PKCS12 keystore from a `Secret` (not the image, not the ConfigMap) and
+move the whole config into a `Secret` too, since `tls.password` would otherwise be
+plaintext in a ConfigMap.
 
 ## What it's good for
 

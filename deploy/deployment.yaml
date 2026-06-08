@@ -22,7 +22,7 @@ spec:
         runAsUser: 1000
       containers:
         - name: prism-proxy
-          image: prism-proxy:latest        # replace with your registry/tag
+          image: hanishi/pekko-prism:latest  # prebuilt; or build & push your own
           imagePullPolicy: IfNotPresent
           args: ["/config/proxy.conf"]     # the mounted ConfigMap
           ports:
