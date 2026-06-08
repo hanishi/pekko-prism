@@ -14,7 +14,8 @@ data:
       rules = [
         { type = set-header,   name = "Content-Security-Policy", value = "default-src 'self' https://pekko.apache.org https://*.apache.org 'unsafe-inline'" }
         { type = strip-header, name = "X-Powered-By" },
-        { type = rewrite, from = "Apache Pekko", to = "アパッチ・ペッコ"}
+        { type = rewrite, from = "https://pekko.apache.org", to = "http://localhost:8080"}
+        { type = rewrite-word, from = "Apache Pekko", to = "アパッチ・ペッコ"}
       ]
     }
         pekko.http.host-connection-pool { max-connections = 128, max-open-requests = 512 }

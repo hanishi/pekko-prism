@@ -77,17 +77,19 @@ final class LiteralRewriter(
       i += 1
     }
 
-    if (atEOF) {
-      if (lastEmit < bytes.length)
-        out ++= ByteString.fromArray(bytes, lastEmit, bytes.length - lastEmit)
-      (out.result(), bytes.length)
-    } else {
-      // Only the final boundary matters: anything before (len - currentDepth) can
-      // never start a future match. Compute it once, not per byte.
-      val safe = math.max(lastEmit, bytes.length - ac.depthAt(state))
-      if (lastEmit < safe)
-        out ++= ByteString.fromArray(bytes, lastEmit, safe - lastEmit)
-      (out.result(), safe)
+    // Final consumed point: at EOF everything; otherwise everything that can no longer
+    // start a future match (len - currentDepth), computed once, not per byte.
+    val end =
+      if (atEOF) bytes.length
+      else math.max(lastEmit, bytes.length - ac.depthAt(state))
+
+    // Fast path: no replacement happened (lastEmit still 0), so the output is just the
+    // unchanged prefix — emit it as a zero-copy slice of the input rather than copying
+    // it through the builder. This is the common case for sparse patterns.
+    if (lastEmit == 0) (input.take(end), end)
+    else {
+      if (lastEmit < end) out ++= ByteString.fromArray(bytes, lastEmit, end - lastEmit)
+      (out.result(), end)
     }
   }
 }
