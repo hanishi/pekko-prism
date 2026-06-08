@@ -186,8 +186,30 @@ Because there is no shell, debug with an ephemeral container
 
 `deploy/` mounts the config as a `ConfigMap` at `/config/proxy.conf`, with
 `readiness`/`liveness` probes on `/healthz` and `terminationGracePeriodSeconds: 30`
-(longer than the proxy's 10s drain). Config changes need a `kubectl rollout restart`
-(the proxy reads config at startup).
+(longer than the proxy's 10s drain).
+
+**Access it.** The Service is `ClusterIP` (in-cluster only), so reach it with a
+port-forward to a **free local port** (one nothing else owns, or the forward silently
+loses the bind and you hit the wrong server):
+
+```
+kubectl port-forward svc/prism-proxy 8088:80     # -> http://localhost:8088/
+```
+
+Pick the local side (`8088`) freely; check it is free with `lsof -i:8088`. For a stable
+URL instead of a port-forward, front it with an Ingress, or use a `NodePort`/
+`LoadBalancer` Service if your cluster maps those to the host.
+
+**Keep the config's `port = 8080`.** That value is wired to the Deployment's
+`containerPort` and the health probes. Change it and the probes hit a dead port and the
+pod `CrashLoopBackOff`s. To serve on a different port locally, change only the *local*
+side of the port-forward (`8088:80`), never the config.
+
+**Changing config.** With `reload = true` in the config, just `kubectl apply -f deploy/`
+and the pods hot-reload (after the kubelet ConfigMap sync, up to ~60s), no restart.
+Without it, the proxy reads config only at startup, so `kubectl apply` then
+`kubectl rollout restart deploy/prism-proxy`. Turning `reload` on itself needs one
+restart to take effect.
 
 **TLS / certificates.** For real certs, terminate TLS at an **Ingress** with
 **cert-manager** (Let's Encrypt or your CA) and run the proxy plain HTTP behind it: the
