@@ -145,6 +145,11 @@ strips them, which is for authorized security testing only, never production tra
 ./run-proxy-server.sh proxy.conf
 ```
 
+It also supports **scoped rules** (`when { path/host/method }`, so a rule fires only on
+matching requests), **request-side rules** (`request-rules`: set/strip request headers,
+rewrite the request body before forwarding), a Prometheus **`/metrics`** endpoint, and
+**hot config reload** (`reload = true` swaps rules live, no restart).
+
 The full configuration reference (every setting, all rule types, how rules combine,
 and worked recipes) is in [`docs/proxy-config.md`](docs/proxy-config.md).
 

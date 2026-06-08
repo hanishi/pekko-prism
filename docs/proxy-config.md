@@ -21,11 +21,15 @@ combine, what the proxy does to traffic, how to run it, and worked recipes.
    - [Header rules](#header-rules)
    - [How rules combine](#how-rules-combine)
    - [`text-only` mode](#text-only-mode)
-6. [Connection pool to the origin](#connection-pool-to-the-origin)
-7. [What the proxy does to traffic](#what-the-proxy-does-to-traffic)
-8. [Running it](#running-it)
-9. [Recipes](#recipes)
-10. [Limitations](#limitations)
+   - [Scoped rules (`when`)](#scoped-rules-when)
+6. [Request rules](#request-rules)
+7. [Metrics](#metrics)
+8. [Hot reload](#hot-reload)
+9. [Connection pool to the origin](#connection-pool-to-the-origin)
+10. [What the proxy does to traffic](#what-the-proxy-does-to-traffic)
+11. [Running it](#running-it)
+12. [Recipes](#recipes)
+13. [Limitations](#limitations)
 
 ## Quick start
 
@@ -49,16 +53,19 @@ curl -s http://localhost:8080/
 
 All keys live under `prism.proxy`.
 
-| Key           | Type           | Default                   | Meaning                                                                          |
-| ------------- | -------------- | ------------------------- | -------------------------------------------------------------------------------- |
-| `interface`   | string         | `"0.0.0.0"`               | Address to bind the server socket to.                                            |
-| `port`        | int            | `8080`                    | Port to listen on.                                                               |
-| `origin`      | string (URL)   | `"http://localhost:9001"` | The upstream this proxy fronts. Scheme may be `http` or `https`.                 |
-| `health-path` | string         | `"/healthz"`              | Path that returns `200 ok` directly, without proxying.                           |
-| `accept`      | list of string | `["html"]`                | Which response content types to rewrite. See [below](#content-type-gate-accept). |
-| `text-only`   | boolean        | `false`                   | Confine body content rewrites to HTML text nodes. See [below](#text-only-mode).  |
-| `tls`         | object         | disabled                  | Serve HTTPS from a PKCS12 keystore. See [below](#tls).                           |
-| `rules`       | list of object | `[]`                      | Body and header rewrite rules, applied in order. See [below](#rules).            |
+| Key             | Type           | Default                   | Meaning                                                                              |
+| --------------- | -------------- | ------------------------- | ------------------------------------------------------------------------------------ |
+| `interface`     | string         | `"0.0.0.0"`               | Address to bind the server socket to.                                                |
+| `port`          | int            | `8080`                    | Port to listen on.                                                                   |
+| `origin`        | string (URL)   | `"http://localhost:9001"` | The upstream this proxy fronts. Scheme may be `http` or `https`.                     |
+| `health-path`   | string         | `"/healthz"`              | Path that returns `200 ok` directly, without proxying.                               |
+| `metrics-path`  | string         | `"/metrics"`              | Prometheus metrics endpoint; `""` to disable. See [Metrics](#metrics).               |
+| `reload`        | boolean        | `false`                   | Watch the config file and hot-reload rules on change. See [Hot reload](#hot-reload). |
+| `accept`        | list of string | `["html"]`                | Which response content types to rewrite. See [below](#content-type-gate-accept).     |
+| `text-only`     | boolean        | `false`                   | Confine body content rewrites to HTML text nodes. See [below](#text-only-mode).      |
+| `tls`           | object         | disabled                  | Serve HTTPS from a PKCS12 keystore. See [below](#tls).                               |
+| `rules`         | list of object | `[]`                      | Body and header rewrite rules, applied in order. See [below](#rules).                |
+| `request-rules` | list of object | `[]`                      | Rules applied to the request before forwarding. See [Request rules](#request-rules). |
 
 The client connection pool toward the origin is configured under the standard Pekko
 key `pekko.http.host-connection-pool`, not under `prism.proxy`. See
@@ -246,6 +253,71 @@ rules are always whole-body and are unaffected by `text-only`.
 
 The tokenizer is a fast, pragmatic HTML scanner, not a full HTML5 parser. See
 [Limitations](#limitations).
+
+### Scoped rules (`when`)
+
+Any rule, body or header, may carry a `when` block so it applies only to matching
+requests. Conditions are AND-ed; an absent condition is a wildcard.
+
+```hocon
+{ type = rewrite,      from = "X", to = "Y", when { path = "/api/*" } }
+{ type = set-header,   name = "X-Env", value = "stg", when { host = "staging.example.com" } }
+{ type = strip-header, name = "Server", when { method = "GET" } }
+```
+
+| Field    | Matches                                                            |
+| -------- | ------------------------------------------------------------------ |
+| `path`   | request path; a trailing `*` is a prefix wildcard, otherwise exact |
+| `host`   | request Host (port ignored), case-insensitive                      |
+| `method` | HTTP method, case-insensitive                                      |
+
+A rule with no `when` applies to every request (the default). When no rule is scoped the
+response flow is request-independent and built once; scoped rules are selected per request.
+
+## Request rules
+
+`request-rules` is a separate ordered list applied to the **request** on its way to the
+origin, before the response is fetched:
+
+- `set-header` / `strip-header`: add/replace or remove a request header.
+- `rewrite` / `rewrite-word`: rewrite the request **body** (gated by `accept`, like
+  responses, so non-text uploads are left alone).
+
+`cookie-flags` is response-only and is ignored here. Request rules are not `when`-scoped.
+
+```hocon
+request-rules = [
+  { type = set-header,   name = "X-Api-Key", value = "s3cr3t" }
+  { type = strip-header, name = "X-Internal" }
+  { type = rewrite,      from = "dev.example.com", to = "prod.example.com" }   # request body
+]
+```
+
+## Metrics
+
+The proxy serves Prometheus metrics at `metrics-path` (default `/metrics`; set `""` to
+disable). The endpoint makes no upstream call and is not itself counted.
+
+```
+prism_requests_total{status="200"} 1234
+prism_upstream_errors_total 3
+prism_request_duration_seconds_bucket{le="0.05"} 1180
+prism_request_duration_seconds_count 1234
+prism_request_duration_seconds_sum 41.2
+```
+
+Scrape it with a Prometheus `ServiceMonitor` or a `prometheus.io/scrape` pod annotation.
+
+## Hot reload
+
+With `reload = true` and the proxy started from a config file, that file is watched and
+its rules are re-read and swapped live on change, with no restart and no dropped
+connections (so a ConfigMap edit needs no `kubectl rollout restart` for a rule change).
+
+Only request-handling settings take effect on reload (rules, request-rules, accept,
+text-only, origin, paths). Binding settings (`interface`, `port`, `tls`, the connection
+pool) are fixed at startup and still need a restart. A parse error is logged and the
+previous config is kept.
 
 ## Connection pool to the origin
 
