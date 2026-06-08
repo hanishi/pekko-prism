@@ -240,11 +240,19 @@ a 10-core Apple Silicon machine, JDK 21, driving a ~1 MB body in 8 KB chunks:
 
 | Benchmark                              | MB/s/core | ns/byte | JMH (µs/op) |
 | -------------------------------------- | --------- | ------- | ----------- |
-| `LiteralRewriter`                      | ~205      | 4.6     | 4842 ± 56   |
+| `LiteralRewriter` (Aho-Corasick)       | ~205      | 4.6     | 4842 ± 56   |
+| `BmhRewriter` (single pattern)         | ~1940     | 0.5     | 540 ± 29    |
 | `WordLiteralRewriter`                  | ~185      | 5.2     | 5450 ± 88   |
 | `TokenRewriter` (capture + url-encode) | ~130      | 7.3     | 7628 ± 145  |
 | `LiteralRewriter` via `RewriteFlow`    | ~200      | 4.8     | 4986 ± 321  |
 | HTML text-node tokenizer (via Flow)    | ~110      | 8.9     | 9360 ± 459  |
+
+**Matcher auto-dispatch.** A single `rewrite` rule uses Boyer-Moore-Horspool, which
+skips ahead on the bad-character rule and runs ~9x faster than Aho-Corasick on a sparse
+pattern (540 vs 5020 µs on the same 1 MB body). Multiple rules fall back to Aho-Corasick,
+which matches the whole set in one O(n) pass. No-match chunks pass through as a zero-copy
+slice. The engine picks per config; the output is identical either way (verified at every
+chunk boundary, including mid-character splits in UTF-8).
 
 The `RewriteFlow` figure tracks the raw `apply` figure, so Pekko Streams adds
 essentially no overhead. O(n) time, **constant memory** (no full-body buffering). For
