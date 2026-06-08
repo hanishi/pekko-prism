@@ -63,13 +63,22 @@ that manages that carry and flushes on completion; `RewriteFlow` lifts a `Rewrit
 into a reusable `Flow`. The matcher is pluggable; the streaming envelope is
 matcher-agnostic.
 
-For example, with the rule `internal -> EXTERNAL` and the body split as
-`…src="http://inter` then `nal/x"…`: the first chunk ends mid-pattern, so the rewriter
-emits up to `inter`, leaves `inter` in the carry, and reports only the bytes before it
-as `consumed`. On the next push the carry is prepended, the rewriter now sees
-`internal`, and emits `EXTERNAL`. The match is found across the boundary, and the carry
-never exceeds the longest pattern, so memory stays bounded no matter how the stream is
-framed.
+The data flows one chunk at a time; the only state is the carry:
+
+```
+   origin response                 RewriteFlow                  to the client
+   (chunks in)                                                  (chunks out)
+
+      chunk  -->  buf = carry ++ chunk  -->  rewriter(buf, atEOF)
+                                             = (output, consumed)  -->  output
+                  carry = buf.drop(consumed)
+                   `-- the unfinalized tail (< longest pattern), held for next chunk
+```
+
+So a pattern split across two chunks is still matched. With `internal -> EXTERNAL` and
+the body split `...http://inter` | `nal/x"...`, push 1 emits up to `inter` and carries
+it; push 2 prepends the carry, sees `internal`, and emits `EXTERNAL`. The carry never
+exceeds the longest pattern, so memory stays bounded no matter how the stream is framed.
 
 ### Rewriters
 
