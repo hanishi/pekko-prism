@@ -30,26 +30,25 @@ object HtmlEntities {
         val semi = s.indexOf(';', i + 1)
         val resolved =
           if (semi > i && semi - (i + 1) <= MaxBodyLen) decodeOne(s.substring(i + 1, semi))
-          else null
-        if (resolved != null) { sb.append(resolved); i = semi + 1 }
+          else ""
+        if (resolved.nonEmpty) { sb.append(resolved); i = semi + 1 }
         else { sb.append(c); i += 1 } // unknown / unterminated → keep the '&' literal
       } else { sb.append(c); i += 1 }
     }
     sb.toString
   }
 
-  /** Decode one entity body (the text between `&` and `;`), or null if unknown. */
-  private def decodeOne(body: String): String = {
-    if (body.isEmpty) return null
-    if (body.charAt(0) == '#') {
+  /** Decode one entity body (the text between `&` and `;`), or `""` if unknown. */
+  private def decodeOne(body: String): String =
+    if (body.isEmpty) ""
+    else if (body.charAt(0) == '#') {
       try {
         val cp =
           if (body.length > 1 && (body.charAt(1) == 'x' || body.charAt(1) == 'X'))
             Integer.parseInt(body.substring(2), 16)
           else
             Integer.parseInt(body.substring(1), 10)
-        if (Character.isValidCodePoint(cp)) new String(Character.toChars(cp)) else null
-      } catch { case _: NumberFormatException => null }
-    } else named.getOrElse(body, null)
-  }
+        if (Character.isValidCodePoint(cp)) new String(Character.toChars(cp)) else ""
+      } catch { case _: NumberFormatException => "" }
+    } else named.getOrElse(body, "")
 }

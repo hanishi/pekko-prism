@@ -76,18 +76,18 @@ final case class ProxyConfig(
    * request headers (`cookie-flags` is response-only and ignored here), and body
    * `rewrite`/`rewrite-word` on the request entity (gated by `accept`, like responses).
    */
-  def applyRequestRules(req: HttpRequest): HttpRequest = {
-    if (!hasRequestRules) return req
-    var hs = req.headers
-    requestHeaderRules.foreach {
-      case HeaderRule.SetHeader(n, v) => hs = hs.filterNot(_.lowercaseName == n.toLowerCase) :+ RawHeader(n, v)
-      case HeaderRule.StripHeader(n)  => hs = hs.filterNot(_.lowercaseName == n.toLowerCase)
-      case _: HeaderRule.CookieFlags  => // not applicable to a request
+  def applyRequestRules(req: HttpRequest): HttpRequest =
+    if (!hasRequestRules) req
+    else {
+      val headers = requestHeaderRules.foldLeft(req.headers) {
+        case (hs, HeaderRule.SetHeader(n, v)) => hs.filterNot(_.lowercaseName == n.toLowerCase) :+ RawHeader(n, v)
+        case (hs, HeaderRule.StripHeader(n))  => hs.filterNot(_.lowercaseName == n.toLowerCase)
+        case (hs, _: HeaderRule.CookieFlags)  => hs // not applicable to a request
+      }
+      val withHeaders = req.withHeaders(headers)
+      if (requestBodyRules.isEmpty || !accept(req.entity.contentType)) withHeaders
+      else withHeaders.withEntity(withHeaders.entity.transformDataBytes(requestRewriteFlow))
     }
-    val withHeaders = req.withHeaders(hs)
-    if (requestBodyRules.isEmpty || !accept(req.entity.contentType)) withHeaders
-    else withHeaders.withEntity(withHeaders.entity.transformDataBytes(requestRewriteFlow))
-  }
 }
 
 /** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. */

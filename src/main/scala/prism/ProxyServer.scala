@@ -59,12 +59,12 @@ object ProxyServer {
     val poolSettings = ConnectionPoolSettings(system)
     val scheme       = if (current().tls.isDefined) "https" else "http" // TLS is fixed at startup
 
-    val flowCache = new AtomicReference[(ProxyConfig, Flow[ByteString, ByteString, ?])]()
-    def flowFor(cfg: ProxyConfig): Flow[ByteString, ByteString, ?] = {
-      val c = flowCache.get()
-      if (c != null && (c._1 eq cfg)) c._2
-      else { val f = cfg.rewriteFlow; flowCache.set((cfg, f)); f }
-    }
+    val flowCache = new AtomicReference[Option[(ProxyConfig, Flow[ByteString, ByteString, ?])]](None)
+    def flowFor(cfg: ProxyConfig): Flow[ByteString, ByteString, ?] =
+      flowCache.get() match {
+        case Some((c, f)) if c eq cfg => f
+        case _                        => val f = cfg.rewriteFlow; flowCache.set(Some((cfg, f))); f
+      }
 
     def keep(h: HttpHeader, rendersHere: Boolean, more: String => Boolean): Boolean =
       rendersHere && !hopByHop(h.lowercaseName) && more(h.lowercaseName)
@@ -143,33 +143,38 @@ object ProxyServer {
     val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm)
     kmf.init(ks, password.toCharArray)
     val ctx = SSLContext.getInstance("TLS")
+    // null trust managers is the JSSE API's way to request the JVM default trust store
+    // (this is a server context, so it does no mutual-TLS client-cert validation).
     ctx.init(kmf.getKeyManagers, null, new SecureRandom())
     ConnectionContext.httpsServer(ctx)
   }
 
+  /** Reparse the config file and swap the live config, keeping the previous one on error. */
+  private def reloadConfig(file: File, cfgRef: AtomicReference[ProxyConfig], log: org.slf4j.Logger): Unit =
+    try {
+      val parsed = ConfigFactory.parseFile(file).withFallback(ConfigFactory.load()).resolve().getConfig("prism.proxy")
+      val next   = ProxyConfig.from(parsed)
+      cfgRef.set(next)
+      log.info("config reloaded from {} ({} body + {} header rule(s))", file.getPath, next.rules.size, next.headerRules.size)
+    } catch {
+      case e: Throwable => log.warn("config reload failed, keeping previous config: {}", e.getMessage)
+    }
+
   /** Poll the config file's mtime and hot-swap the live config when it changes. */
   private def startConfigWatcher(path: String, cfgRef: AtomicReference[ProxyConfig], log: org.slf4j.Logger): Unit = {
     val file = new File(path)
-    val t = new Thread(() => {
-      var last = file.lastModified()
-      while (!Thread.currentThread().isInterrupted) {
-        try Thread.sleep(3000) catch { case _: InterruptedException => return }
-        val now = file.lastModified()
-        if (now != 0L && now != last) {
-          last = now
-          try {
-            val parsed = ConfigFactory.parseFile(file).withFallback(ConfigFactory.load()).resolve().getConfig("prism.proxy")
-            val next   = ProxyConfig.from(parsed)
-            cfgRef.set(next)
-            log.info("config reloaded from {} ({} body + {} header rule(s))", path, next.rules.size, next.headerRules.size)
-          } catch {
-            case e: Throwable => log.warn("config reload failed, keeping previous config: {}", e.getMessage)
-          }
-        }
+    val thread = new Thread(() => {
+      @annotation.tailrec def loop(last: Long): Unit = {
+        Thread.sleep(3000)
+        val now  = file.lastModified()
+        val seen = if (now != 0L && now != last) { reloadConfig(file, cfgRef, log); now } else last
+        loop(seen)
       }
+      try loop(file.lastModified())
+      catch { case _: InterruptedException => () } // thread interrupted on shutdown
     }, "prism-config-watcher")
-    t.setDaemon(true)
-    t.start()
+    thread.setDaemon(true)
+    thread.start()
   }
 
   def main(args: Array[String]): Unit = {

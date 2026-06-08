@@ -51,8 +51,8 @@ final class HtmlTextRewriteStage(inner: Rewriter)
       private var quote        = 0    // inside a tag: 0, or the open quote char code
       private var lastNonSpace = 0    // inside a tag: last non-space byte (for `/>` detection)
       private var isClosing    = false
-      private var pendingRaw: Array[Byte] = null // close target if the open tag is script/style
-      private var rawClose: Array[Byte]   = null // active raw-text close target
+      private var pendingRaw: Array[Byte] = Array.emptyByteArray // close target if open tag is script/style
+      private var rawClose: Array[Byte]   = Array.emptyByteArray // active raw-text close target
       private var rawMatch     = 0
       private var dashCount     = 0   // inside a comment: trailing run of '-'
 
@@ -114,11 +114,11 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                       if (a(p + 2) == '-' && a(p + 3) == '-') {
                         flushText(out)
                         out ++= ByteString.fromArray(a, p, 4); p += 4; mode = COMMENT; dashCount = 0
-                      } else beginTag(out, closing = false, raw = null) // <!doctype …>
-                    } else if (atEOF) beginTag(out, closing = false, raw = null)
+                      } else beginTag(out, closing = false, raw = Array.emptyByteArray) // <!doctype …>
+                    } else if (atEOF) beginTag(out, closing = false, raw = Array.emptyByteArray)
                     else hold = true
                   } else if (c1 == '/') {
-                    beginTag(out, closing = true, raw = null)
+                    beginTag(out, closing = true, raw = Array.emptyByteArray)
                   } else if (isLetter(c1)) {
                     var k = p + 1
                     while (k < n && isLetter(a(k))) k += 1
@@ -127,7 +127,7 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                       val name = new String(a, p + 1, k - (p + 1)).toLowerCase
                       val raw  = if (name == "script") ScriptClose
                                  else if (name == "style") StyleClose
-                                 else null
+                                 else Array.emptyByteArray
                       beginTag(out, closing = false, raw = raw)
                     }
                   } else {
@@ -146,9 +146,9 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                 } else if (b == '"' || b == '\'') {
                   quote = b & 0xff
                 } else if (b == '>') {
-                  val toRaw = pendingRaw != null && !isClosing && lastNonSpace != '/'
+                  val toRaw = pendingRaw.nonEmpty && !isClosing && lastNonSpace != '/'
                   if (toRaw) { rawClose = pendingRaw; rawMatch = 0; mode = RAW } else mode = TEXT
-                  pendingRaw = null; isClosing = false; lastNonSpace = 0
+                  pendingRaw = Array.emptyByteArray; isClosing = false; lastNonSpace = 0
                   done = true
                 } else if (!isSpace(b)) lastNonSpace = b
                 p += 1
@@ -175,8 +175,8 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                   rawMatch += 1
                   if (rawMatch == r.length) {
                     // matched "</script"/"</style"; consume the rest of the tag as TAG
-                    isClosing = true; pendingRaw = null; lastNonSpace = 0; quote = 0
-                    rawMatch = 0; rawClose = null; mode = TAG
+                    isClosing = true; pendingRaw = Array.emptyByteArray; lastNonSpace = 0; quote = 0
+                    rawMatch = 0; rawClose = Array.emptyByteArray; mode = TAG
                   }
                 } else rawMatch = if (lower(a(p)) == r0) 1 else 0
                 p += 1
