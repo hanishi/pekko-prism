@@ -24,25 +24,20 @@ pattern, regardless of body size.
 
 The concept is **Greg Wilkins'**, the creator of Jetty, founder of Webtide.
 
-At a Chinese tech company now known everywhere as a giant, its B2B marketplace had no
-Japanese localization, yet its Japanese joint venture had to sell memberships to
-Japanese companies. A localized experience was needed over an origin that could not be
-changed. A local systems integrator built the first attempt, but it merely tried to parse the
-whole page with regular expressions: to a vendor who only knows web development, every
-problem looks like web development. It was not acceptable. The real problem is harder: rewriting an
-HTTP body as it streams, correctly even when a match straddles a chunk boundary and
-without buffering the whole page. The job then went to Webtide, and Greg Wilkins'
-answer was **jetty-prism**: a streaming proxy, built on Jetty, that rewrote the page as
-it streamed through, translating English to Japanese on the fly. The translation
-map and texts were implemented partly in Groovy, and even strings found inside
-JavaScript were translated. It cost a lot of performance, but it worked, and it ran
-in production until the site shipped native Japanese localization.
+At a Chinese tech company now known everywhere as a giant, its Japanese joint venture
+had to sell over a B2B marketplace that had no Japanese localization, on an origin it
+could not change. A local systems integrator's first attempt just parsed the whole page
+with regular expressions: to a vendor who only knows web development, every problem
+looks like web development. It wasn't acceptable. The real problem is harder, and
+streaming: rewrite the HTTP body as it flows, correctly across chunk boundaries, without
+buffering. Webtide took it on, and Greg Wilkins' answer was **jetty-prism**: a streaming
+Jetty proxy that translated English to Japanese on the fly (the translation map partly
+in Groovy, even strings inside JavaScript), in production until the site shipped native
+localization.
 
 **pekko-prism is a clean-room reimplementation of that idea on Pekko Streams**: the
-concept recalled and rewritten from scratch. Same core: find/replace/inject content
-in a byte stream, even when matches cross chunk boundaries, with backpressure and
-bounded memory. Different substrate, and a few deliberate upgrades that trace
-directly back to where the original hurt:
+concept recalled and rebuilt from scratch, with a few upgrades that trace back to where
+the original hurt:
 
 | Concern                          | `jetty-prism` (Jetty 7/8 era)           | here (Pekko)                                               |
 | -------------------------------- | --------------------------------------- | ---------------------------------------------------------- |
@@ -67,6 +62,14 @@ it as the "carry" and prepends it to the next chunk. `RewriteStage` is the `Grap
 that manages that carry and flushes on completion; `RewriteFlow` lifts a `Rewriter`
 into a reusable `Flow`. The matcher is pluggable; the streaming envelope is
 matcher-agnostic.
+
+For example, with the rule `internal -> EXTERNAL` and the body split as
+`…src="http://inter` then `nal/x"…`: the first chunk ends mid-pattern, so the rewriter
+emits up to `inter`, leaves `inter` in the carry, and reports only the bytes before it
+as `consumed`. On the next push the carry is prepended, the rewriter now sees
+`internal`, and emits `EXTERNAL`. The match is found across the boundary, and the carry
+never exceeds the longest pattern, so memory stays bounded no matter how the stream is
+framed.
 
 ### Rewriters
 
