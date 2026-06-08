@@ -83,13 +83,13 @@ exceeds the longest pattern, so memory stays bounded no matter how the stream is
 ### Rewriters
 
 The concrete `Rewriter` building blocks. Use them directly via `RewriteFlow(rewriter)`,
-or let the config `rules` (`rewrite`, `rewrite-word`, `wrap-url`, …) map onto them.
+or let the config `rules` (`rewrite`, `rewrite-word`, `wrap-url`, ...) map onto them.
 
 | Rewriter                                       | What it does                                                                                                                               |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `LiteralRewriter`                              | multi-pattern literal `from -> to` (whole body); matched by BMH / Wu-Manber / Aho-Corasick automatically (see [Performance](#performance)) |
 | `WordLiteralRewriter`                          | same, but only on whole words (`head` is not `header`/`ahead`)                                                                             |
-| `UrlAttributeRewriter`                         | rewrite only HTML attribute *values* (`href`, `src`, …); case-insensitive, entity-decoding                                                 |
+| `UrlAttributeRewriter`                         | rewrite only HTML attribute *values* (`href`, `src`, ...); case-insensitive, entity-decoding                                               |
 | `TokenRewriter`                                | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there                           |
 | `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments                            |
 
@@ -179,8 +179,8 @@ docker build -t <you>/pekko-prism:latest .
 docker push  <you>/pekko-prism:latest     # then set that in deploy/deployment.yaml
 ```
 
-(For a local-only image, load it into the cluster nodes with `kind load docker-image …`
-/ `minikube image load …` instead of pushing, or you get `ImagePullBackOff`.)
+(For a local-only image, load it into the cluster nodes with `kind load docker-image ...`
+/ `minikube image load ...` instead of pushing, or you get `ImagePullBackOff`.)
 
 The image is **distroless** (`gcr.io/distroless/java21-debian12`): ~237 MB, a real JVM
 on a minimal base with no shell or package manager, which cuts the CVE/attack surface.
