@@ -49,16 +49,16 @@ curl -s http://localhost:8080/
 
 All keys live under `prism.proxy`.
 
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `interface` | string | `"0.0.0.0"` | Address to bind the server socket to. |
-| `port` | int | `8080` | Port to listen on. |
-| `origin` | string (URL) | `"http://localhost:9001"` | The upstream this proxy fronts. Scheme may be `http` or `https`. |
-| `health-path` | string | `"/healthz"` | Path that returns `200 ok` directly, without proxying. |
-| `accept` | list of string | `["html"]` | Which response content types to rewrite. See [below](#content-type-gate-accept). |
-| `text-only` | boolean | `false` | Confine body content rewrites to HTML text nodes. See [below](#text-only-mode). |
-| `tls` | object | disabled | Serve HTTPS from a PKCS12 keystore. See [below](#tls). |
-| `rules` | list of object | `[]` | Body and header rewrite rules, applied in order. See [below](#rules). |
+| Key           | Type           | Default                   | Meaning                                                                          |
+| ------------- | -------------- | ------------------------- | -------------------------------------------------------------------------------- |
+| `interface`   | string         | `"0.0.0.0"`               | Address to bind the server socket to.                                            |
+| `port`        | int            | `8080`                    | Port to listen on.                                                               |
+| `origin`      | string (URL)   | `"http://localhost:9001"` | The upstream this proxy fronts. Scheme may be `http` or `https`.                 |
+| `health-path` | string         | `"/healthz"`              | Path that returns `200 ok` directly, without proxying.                           |
+| `accept`      | list of string | `["html"]`                | Which response content types to rewrite. See [below](#content-type-gate-accept). |
+| `text-only`   | boolean        | `false`                   | Confine body content rewrites to HTML text nodes. See [below](#text-only-mode).  |
+| `tls`         | object         | disabled                  | Serve HTTPS from a PKCS12 keystore. See [below](#tls).                           |
+| `rules`       | list of object | `[]`                      | Body and header rewrite rules, applied in order. See [below](#rules).            |
 
 The client connection pool toward the origin is configured under the standard Pekko
 key `pekko.http.host-connection-pool`, not under `prism.proxy`. See
@@ -70,12 +70,12 @@ The proxy only rewrites responses whose `Content-Type` matches `accept`. Everyth
 else (images, JSON, binaries, already-compressed blobs) passes through untouched, so a
 rewrite can never corrupt non-text payloads. Accepted values:
 
-| Value | Matches |
-|---|---|
-| `"html"` | `text/html` |
-| `"xml"` | `text/xml`, `application/xml`, and any `…+xml` (VAST, RSS, SOAP, Atom) |
-| `"text/css"` (any `type/subtype`) | exactly that media type |
-| `"all"` or `"*"` | every content type (use with care) |
+| Value                             | Matches                                                                |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| `"html"`                          | `text/html`                                                            |
+| `"xml"`                           | `text/xml`, `application/xml`, and any `…+xml` (VAST, RSS, SOAP, Atom) |
+| `"text/css"` (any `type/subtype`) | exactly that media type                                                |
+| `"all"` or `"*"`                  | every content type (use with care)                                     |
 
 Examples:
 
@@ -125,10 +125,10 @@ split by type internally.
 { type = rewrite, from = "internal.example.com", to = "www.example.com" }
 ```
 
-| Field | Meaning |
-|---|---|
+| Field  | Meaning                |
+| ------ | ---------------------- |
 | `from` | literal string to find |
-| `to` | replacement |
+| `to`   | replacement            |
 
 Non-overlapping, left-to-right, case-sensitive, matched even across chunk boundaries.
 Multiple `rewrite` rules are applied together in a single pass.
@@ -152,10 +152,10 @@ for markup protection.
   template = "https://fp.example.com/collect?dest={enc}" }
 ```
 
-| Field | Meaning |
-|---|---|
-| `anchor` | string a URL starts with; the captured token runs from here to the next URL delimiter |
-| `template` | replacement, with `{url}` = the captured URL and `{enc}` = its URL-encoded form |
+| Field      | Meaning                                                                               |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `anchor`   | string a URL starts with; the captured token runs from here to the next URL delimiter |
+| `template` | replacement, with `{url}` = the captured URL and `{enc}` = its URL-encoded form       |
 
 The replacement is a function of the captured original, which is what first-party
 tracker proxying needs (capture the third-party URL, encode it into a first-party
@@ -168,10 +168,10 @@ endpoint). Always whole-body, since URLs live in attributes and CDATA, not text 
 { type = insert-after,  anchor = "<body>",  html = "<div id=banner>...</div>" }
 ```
 
-| Field | Meaning |
-|---|---|
-| `anchor` | literal string to insert relative to (typically a tag) |
-| `html` | content inserted immediately before / after each `anchor` |
+| Field    | Meaning                                                   |
+| -------- | --------------------------------------------------------- |
+| `anchor` | literal string to insert relative to (typically a tag)    |
+| `html`   | content inserted immediately before / after each `anchor` |
 
 For schema-significant formats like VAST, insert before the element that should follow
 yours (e.g. insert an `<Impression>` before `<Creatives>`), not just before a closing
@@ -190,11 +190,11 @@ a header rule can never touch the body.
 { type = cookie-flags, http-only = true, secure = true, same-site = "Lax" }
 ```
 
-| Field | Type | Meaning |
-|---|---|---|
-| `http-only` | boolean (optional) | set `HttpOnly` to this value on every `Set-Cookie` |
-| `secure` | boolean (optional) | set `Secure` |
-| `same-site` | `"Lax"` / `"Strict"` / `"None"` (optional) | set `SameSite` |
+| Field       | Type                                       | Meaning                                            |
+| ----------- | ------------------------------------------ | -------------------------------------------------- |
+| `http-only` | boolean (optional)                         | set `HttpOnly` to this value on every `Set-Cookie` |
+| `secure`    | boolean (optional)                         | set `Secure`                                       |
+| `same-site` | `"Lax"` / `"Strict"` / `"None"` (optional) | set `SameSite`                                     |
 
 Omitted fields are left unchanged. `true` enforces a flag (a deployable hardening for
 an app you cannot change). `http-only = false` strips it, which weakens security and
@@ -296,10 +296,10 @@ sbt assembly
 java -jar target/scala-3.3.4/prism-proxy.jar proxy.conf
 java -jar target/scala-3.3.4/prism-proxy.jar            # no arg: application.conf defaults
 
-# docker (config injected, not baked)
-docker build -t prism-proxy:latest .
+# docker (config injected, not baked; prebuilt image on Docker Hub)
 docker run --rm -p 8080:8080 -v "$PWD/proxy.conf:/config/proxy.conf" \
-  prism-proxy:latest /config/proxy.conf
+  hanishi/pekko-prism:latest /config/proxy.conf
+# or build your own: sbt assembly && docker build -t pekko-prism:latest .
 
 # kubernetes
 kubectl apply -f deploy/     # ConfigMap (config) + Deployment + Service

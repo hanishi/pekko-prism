@@ -90,11 +90,6 @@ exceeds the longest pattern, so memory stays bounded no matter how the stream is
 | `TokenRewriter`                                | **capture** a token (e.g. a URL) and emit `transform(captured)`; the replacement is a function of what was there |
 | `HtmlTextRewriteStage` / `HtmlTextRewriteFlow` | apply any inner rewriter **only to HTML text nodes**, never tags, attributes, `<script>`/`<style>`, or comments  |
 
-The carry the streaming envelope retains never exceeds the longest pattern (+1 for
-the word/capture variants), so memory is bounded regardless of body size. The key
-test runs each rewrite at **every possible chunk boundary** (sizes 1..N) and asserts
-the output is identical to a single-pass reference.
-
 ## Use it from Pekko HTTP
 
 `prism.http.RewriteHttp` is the content-safe wrapper around `transformDataBytes`: it
@@ -251,6 +246,9 @@ across cores.
 ```
 sbt test
 ```
+
+The key test runs each rewrite at **every possible chunk boundary** (sizes 1..N) and
+asserts the output is identical to a single-pass reference.
 
 ## Credits
 
