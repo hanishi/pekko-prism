@@ -39,6 +39,7 @@ class RewriteBench {
   var token: Rewriter            = uninitialized
   var acSingle: Rewriter         = uninitialized
   var bmhSingle: Rewriter        = uninitialized
+  var wuManber: Rewriter         = uninitialized
 
   @Setup
   def setup(): Unit = {
@@ -51,6 +52,8 @@ class RewriteBench {
     // Same single long pattern, two matchers, to compare Aho-Corasick vs Boyer-Moore-Horspool.
     acSingle  = new LiteralRewriter(Seq("internal.example.com" -> "localhost"))
     bmhSingle = BmhRewriter("internal.example.com", "localhost")
+    // Same multi-pattern set, Aho-Corasick (`literal`) vs Wu-Manber.
+    wuManber  = new WuManberRewriter(Seq("internal.example.com" -> "localhost", "</head>" -> "x"))
   }
 
   /** Drive a Rewriter over the chunks exactly as RewriteStage does (carry + flush). */
@@ -74,4 +77,5 @@ class RewriteBench {
   @Benchmark def tokenRewriter(): Long   = drive(token)
   @Benchmark def acSinglePattern(): Long  = drive(acSingle)
   @Benchmark def bmhSinglePattern(): Long = drive(bmhSingle)
+  @Benchmark def wuManberMulti(): Long    = drive(wuManber)
 }

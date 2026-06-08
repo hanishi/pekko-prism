@@ -199,4 +199,14 @@ class ProxyConfigSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
       out.headers.exists(_.lowercaseName == "server") shouldBe false
     }
   }
+
+  "RuleFlow.independent (Wu-Manber dispatch guard)" should {
+    "be true when no pattern is a substring of another" in {
+      RuleFlow.independent(List("internal.example.com", "</head>", "tracker.example.com")) shouldBe true
+    }
+    "be false when a pattern is a substring of another" in {
+      RuleFlow.independent(List("ab", "abcd"))      shouldBe false // prefix
+      RuleFlow.independent(List("head", "</head>")) shouldBe false // contained
+    }
+  }
 }

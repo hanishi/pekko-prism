@@ -93,6 +93,17 @@ final case class ProxyConfig(
 
 /** Turns a list of [[Rule]]s into the byte-rewriting flow they describe. */
 object RuleFlow {
+
+  /**
+   * True if no pattern is a (contiguous) substring of another. Under this condition
+   * Wu-Manber's leftmost-longest-by-start selection is identical to Aho-Corasick's
+   * leftmost-by-end, so the two produce the same output and we may dispatch to the
+   * faster one. Divergence is only possible when one match's span contains another's,
+   * which requires substring containment.
+   */
+  private[prism] def independent(ps: List[String]): Boolean =
+    ps.forall(p => ps.forall(q => p == q || !q.contains(p)))
+
   def build(rules: List[Rule], textOnly: Boolean): Flow[ByteString, ByteString, ?] = {
     val literal = rules.collect { case Rule.Rewrite(f, t) => (f, t) }
     val words   = rules.collect { case Rule.RewriteWord(f, t) => (f, t) }
@@ -103,11 +114,15 @@ object RuleFlow {
     }
 
     val content = ListBuffer[Rewriter]()
-    // One pattern -> Boyer-Moore-Horspool (skips, ~9x faster); many -> Aho-Corasick.
+    // Pick the fastest correct matcher: one pattern -> Boyer-Moore-Horspool (~9x);
+    // several independent patterns -> Wu-Manber (~4x); otherwise Aho-Corasick.
     if (literal.nonEmpty)
-      content +=
-        (if (literal.sizeIs == 1) BmhRewriter(literal.head._1, literal.head._2)
-         else new LiteralRewriter(literal))
+      content += {
+        val froms = literal.map(_._1)
+        if (literal.sizeIs == 1) BmhRewriter(literal.head._1, literal.head._2)
+        else if (froms.forall(_.length >= 2) && RuleFlow.independent(froms)) new WuManberRewriter(literal)
+        else new LiteralRewriter(literal)
+      }
     if (words.nonEmpty)   content += new WordLiteralRewriter(words)
 
     // --text confines content rewrites to HTML text nodes; wrap-url and insert are
