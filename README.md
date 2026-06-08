@@ -261,6 +261,28 @@ No-match chunks pass through as a zero-copy slice. Output is identical across al
 (verified at every chunk boundary, including mid-character splits in UTF-8); the skip
 matchers are chosen only when their selection provably matches Aho-Corasick's.
 
+The choice is made once, when the config is built (startup or hot-reload), so it costs
+nothing per request:
+
+```
+literal rewrite patterns?
+  1 ................................... Boyer-Moore-Horspool
+  2+ and any pattern < 2 bytes ........ Aho-Corasick
+  2+ and one pattern inside another ... Aho-Corasick
+  2+ otherwise ........................ Wu-Manber
+```
+
+| `rewrite` patterns                | matcher      | why                                             |
+| --------------------------------- | ------------ | ----------------------------------------------- |
+| `internal.example.com`            | BMH          | one pattern                                     |
+| `internal.example.com`, `</head>` | Wu-Manber    | 2+, both >= 2 bytes, neither contains the other |
+| `head`, `</head>`                 | Aho-Corasick | `head` is a substring of `</head>`              |
+| `x`, `abc`                        | Aho-Corasick | `x` is one byte                                 |
+
+The `< 2 bytes` guard exists because Wu-Manber indexes 2-byte blocks; the substring guard
+because Wu-Manber selects longest-at-start while Aho-Corasick selects leftmost-by-end, and
+those differ only when one match's span contains another's.
+
 The `RewriteFlow` figure tracks the raw `apply` figure, so Pekko Streams adds
 essentially no overhead. O(n) time, **constant memory** (no full-body buffering). For
 per-request rewriting this is far below network/origin latency (a 100 KB page rewrites
