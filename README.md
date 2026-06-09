@@ -292,6 +292,14 @@ per-request rewriting this is far below network/origin latency (a 100 KB page re
 in well under a millisecond), so the engine is never the bottleneck; throughput scales
 across cores.
 
+How does this compare to a plain `String.replace` or a regex per message, and where does
+streaming win outright (not just on speed)? A measured head-to-head, plus the chunk
+boundary that `.replace` cannot cross, is in
+[`docs/streaming-vs-replace.md`](docs/streaming-vs-replace.md). The short version: one
+literal pattern on a complete message is a tie with `.replace`; several patterns are ~2x
+faster (and ~10x vs regex); and a match split across chunks is something `.replace` simply
+cannot do.
+
 > Reproduce: `sbt "bench/Jmh/run"`. The benchmarks live in the `bench` subproject,
 > which depends on the library but is never published and is not aggregated by root,
 > so it stays out of the library jar.
