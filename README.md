@@ -156,6 +156,25 @@ rewrite the request body before forwarding), a Prometheus **`/metrics`** endpoin
 The full configuration reference (every setting, all rule types, how rules combine,
 and worked recipes) is in [`docs/proxy-config.md`](docs/proxy-config.md).
 
+## Generate a config for a target site (`/prism-config`)
+
+The repo ships a Claude Code skill that authors a `prism.proxy` config for a real site.
+Point it at a URL and it inspects the page, hosts, absolute-vs-relative links, third-party
+trackers, response headers, cookies, and CSP, then emits tailored rules:
+
+```
+/prism-config https://the-site-you-want-to-front.com
+```
+
+It is LLM-driven on purpose. The useful decisions are judgment a template cannot make:
+which absolute URLs are worth rewriting (vs a relative-link site where it is a no-op),
+which third-party hosts are trackers to wrap vs legitimate outbound links to leave alone,
+and whether a `Content-Security-Policy` needs stripping, widening, or nothing (a host
+rewrite often makes the assets same-origin and keeps the existing CSP valid). It honors the
+gotchas (keeps `port = 8080`, never invents a host rewrite for a relative-link site) and
+prefers a minimal config over padded noise. The skill lives in
+[`.claude/skills/prism-config/`](.claude/skills/prism-config/SKILL.md).
+
 ## Deploy (Docker / Kubernetes)
 
 A prebuilt distroless image is published at `docker.io/hanishi/pekko-prism:latest`, and
