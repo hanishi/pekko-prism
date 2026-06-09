@@ -1,98 +1,220 @@
-# Streaming rewriting vs `String.replace` / regex
+# Streaming rewriting vs `String.replace`
 
-When does this engine actually beat a plain `msg.replace(a, b)` or a regex? We measured
-it (JMH, `bench/src/main/scala/prism/MessageBench.scala`) on complete in-memory messages,
-then drew the line where streaming makes the alternatives not just slower but impossible.
+Prism is not meant to replace `String.replace`.
 
-## Complete messages: the honest scorecard
+For a complete in-memory string, especially with one literal pattern, `String.replace` is
+already excellent. It is simple, heavily optimized, and usually the right tool.
 
-These are complete payloads already in memory (a Kafka record, a Pub/Sub message, an HTTP
-body you've buffered). All methods produce byte-identical output (checked in the bench).
+Prism solves a different problem:
 
-Microseconds per message, **multiple patterns** (5 independent literal rules):
+> rewriting byte streams correctly while the data is still streaming.
 
-| size    | regex | Aho-Corasick | chained `.replace` | Wu-Manber |
-| ------- | ----- | ------------ | ------------------ | --------- |
-| ~4.5 KB | 55.3  | 21.4         | 10.7               | **5.3**   |
-| ~72 KB  | 861   | 312          | 193                | **90**    |
-| ~1.1 MB | 14148 | 5053         | 2817               | **1520**  |
+That distinction matters. Once the body is not fully in memory, `.replace` is no longer
+just a slower abstraction. It becomes the wrong abstraction.
 
-Microseconds per message, **single pattern**:
+## The simple case: use `String.replace`
 
-| size    | `String.replace` | Boyer-Moore-Horspool |
-| ------- | ---------------- | -------------------- |
-| ~4.5 KB | 1.94             | 1.87                 |
-| ~72 KB  | 30.9             | 30.7                 |
-| ~1.1 MB | 516              | 478                  |
+If you already have the whole value in memory:
 
-What the numbers say:
+```scala
+val out = input.replace("internal.example.com", "public.example.com")
+```
 
-- **One literal pattern is a tie.** BMH and `String.replace` trade blows (a scalar skip
-  vs a vectorized `indexOf` intrinsic). The engine gives no speed edge here; `.replace`
-  is simpler, so use it.
-- **Multiple patterns: the engine wins ~2x over chained `.replace`** (which needs one
-  pass per pattern) and **~10x over regex**. Regex is the worst by a wide margin at every
-  size.
-- **Aho-Corasick loses to `.replace`.** A serial state machine that touches every byte
-  cannot beat a SIMD `indexOf`, even across 5 passes. The engine's speed comes from
-  *skipping* (BMH / Wu-Manber), which is exactly why the matcher dispatch reaches for
-  those first and treats Aho-Corasick as the correctness floor.
-- **The ratios are flat with size** (linear scaling), so this picture holds from 4 KB to
-  1 MB; only the absolute savings grow.
+then `String.replace` is hard to beat. For one literal replacement, Prism is not trying to
+win; the JDK implementation is highly optimized, and the benchmark reflects that.
 
-Two things the timings do not show, but matter:
+Use `String.replace` when all of these are true:
 
-- For patterns where one **contains** another, chained `.replace` is *wrong*: it cascades
-  (`a -> X` then `X -> Y` double-rewrites). The engine (Aho-Corasick) is correct.
-- The engine does rewrites `.replace` cannot express at all (whole-word,
-  capture-and-transform, attribute-scoped, HTML-text-only); the only `.replace`
-  alternative for those is a regex.
+- the full body is already materialized
+- the body is small enough to hold comfortably in memory
+- the replacement rule is simple
+- chunk boundaries do not exist or do not matter
 
-## The line `.replace` cannot cross: streaming
+That is not the problem Prism is designed for.
 
-Everything above assumes the **whole message is in memory**. The moment it is not,
-`String.replace` stops being slower and becomes impossible:
+## The streaming problem
 
-1. **It needs the entire body at once.** A 1 GB response, or an unbounded stream, must be
-   fully buffered before `.replace` can run. The engine processes it in fixed-size chunks
-   with memory bounded by the longest pattern, not by the body.
+HTTP bodies, TCP streams, file streams, and proxy responses do not naturally arrive as one
+complete string. They arrive as chunks:
 
-2. **Per-chunk `.replace` silently misses matches that straddle a chunk boundary.** If you
-   try to "stream" by `.replace`-ing each chunk independently, a pattern split across two
-   chunks is never found:
+```
+Chunk 1: ... href="https://internal.exam
+Chunk 2: ple.com/path" ...
+```
 
-   ```
-   chunk 1: ...href="http://internal.examp
-   chunk 2: le.com/x"...
+A per-chunk replacement cannot see the full match, because the pattern crosses the boundary
+between two chunks:
 
-   per-chunk .replace("internal.example.com", "X"):
-      chunk 1 -> unchanged (no full match)
-      chunk 2 -> unchanged (no full match)
-      joined  -> "...internal.example.com/x..."   # MISSED, still there
+```
+internal.exam | ple.com
+```
 
-   streaming engine (carry):
-      chunk 1 -> emit up to "internal.examp", hold it as carry
-      chunk 2 -> prepend carry, see "internal.example.com", emit "X"
-      joined  -> "...X/x..."                       # caught
-   ```
+A naive implementation like this is incorrect:
 
-   This is the whole reason the engine exists: the carry stitches matches across arbitrary
-   network/chunk boundaries, which a stateless `.replace` over independent chunks cannot
-   do. It is verified by `src/test/scala/prism/StreamingVsReplaceSpec.scala` and by the
-   every-chunk-boundary oracle across the rewriter specs.
+```scala
+source.map { bytes =>
+  ByteString(bytes.utf8String.replace("internal.example.com", "public.example.com"))
+}
+```
 
-3. **Backpressure.** As a Pekko Streams `Flow`, it inherits flow control; a `.replace`
-   pipeline has none.
+It only rewrites matches that are fully contained inside a single chunk. That means it works
+in tests until the stream happens to split at the wrong byte.
 
-## When to use what
+Prism is designed for this case. It carries enough boundary state to detect matches that
+straddle chunks, without buffering the entire body. (Verified in
+`src/test/scala/prism/StreamingVsReplaceSpec.scala`.)
 
-| situation                                | use                            |
-| ---------------------------------------- | ------------------------------ |
-| one literal swap, small in-memory message| `String.replace`               |
-| several patterns, in-memory message      | this engine (~2x, and correct) |
-| word / capture / attribute / HTML-aware  | this engine (regex otherwise)  |
-| streaming / chunked / too big to buffer  | **this engine only**           |
-| anything you would write a regex for     | this engine (~10x, saner)      |
+## What Prism provides
+
+Prism is a streaming rewrite engine:
+
+```scala
+val flow: Flow[ByteString, ByteString, NotUsed] = RewriteFlow(rewriter)
+```
+
+It can be inserted into a Pekko Streams pipeline and used directly on byte streams. The
+important properties are:
+
+1. **Chunk-boundary correctness.** Matches are found even when the pattern is split across
+   chunks.
+2. **Bounded memory.** Prism does not need to buffer the entire body. Memory is bounded by
+   the longest pattern and the internal rewrite state, not by the size of the response.
+3. **Backpressure.** Prism is a Pekko Streams `Flow`, so it participates in the same
+   demand-driven flow control as the rest of the stream. A plain `String.replace` only runs
+   after the payload has already been materialized as one complete value; it does not solve
+   streaming flow control or bounded-memory rewriting.
+4. **Multiple rewrite rules.** Prism is built for rewrite pipelines with multiple patterns,
+   host rewrites, tag injection, URL wrapping, and similar proxy transformations.
+
+## Why chained `.replace` changes the cost model
+
+For one literal replacement, this is fine:
+
+```scala
+input.replace("a", "b")
+```
+
+But multiple replacements usually become chained passes:
+
+```scala
+input
+  .replace("internal.example.com", "public.example.com")
+  .replace("http://", "https://")
+  .replace("/old-path", "/new-path")
+```
+
+Each replacement scans the string again and may allocate another intermediate string. That
+is acceptable for small strings, not ideal for large bodies, and it does not solve streaming
+correctness. Chaining can also be *wrong* when one pattern is a substring of another: a later
+`.replace` rewrites the output of an earlier one (`a -> X`, then `X -> Y`, turns the original
+`a` into `Y`). Prism applies all patterns in a single non-overlapping pass, so replacements
+never re-match each other.
+
+## Why this is not just Aho-Corasick
+
+Aho-Corasick is a standard algorithm for matching many literal patterns in one pass. It is
+useful, but it is not automatically faster than `String.replace` in every situation.
+
+For complete in-memory strings, HotSpot's `String.indexOf` path is extremely optimized. In
+simple literal benchmarks, repeated `replace` calls can be surprisingly competitive, because
+the JDK is very good at scanning strings. A generic byte-by-byte state machine can lose to a
+highly optimized JDK intrinsic.
+
+Prism's advantage is not merely "one pass." It is the combination of:
+
+- streaming operation
+- chunk-boundary correctness
+- bounded memory
+- backpressure
+- rewrite-oriented state handling
+- skipping and fast paths where possible
+
+The point is not that every streaming state machine beats `String.replace`. The point is
+that `String.replace` is not a streaming rewrite engine.
+
+## What the benchmark actually showed
+
+Measured per complete message (JMH, `bench/src/main/scala/prism/MessageBench.scala`):
+
+- **One literal pattern is a tie.** Boyer-Moore-Horspool and `String.replace` land within
+  noise at every size (~478 vs ~516 us on a 1 MB message). Use `.replace`.
+- **Several independent patterns: Prism (Wu-Manber) is ~2x faster** than chained `.replace`,
+  and **~10x faster than a compiled regex** (1520 vs 2817 vs 14148 us on 1 MB).
+- **Aho-Corasick loses to `.replace`** at every size, exactly as described above. Prism's
+  speed comes from skipping (BMH / Wu-Manber), not from the automaton.
+- The ratios are flat with size (linear scaling), so the picture holds from 4 KB to 1 MB.
+
+The benchmark should be read this way:
+
+| Case                          | Interpretation                                                                |
+| ----------------------------- | ----------------------------------------------------------------------------- |
+| One literal replacement       | `String.replace` is already excellent. Use it.                                |
+| Multiple literal replacements | Chained `.replace` starts paying for repeated scans and intermediate strings. |
+| Regex-style rewriting         | General-purpose regex replacement can be much more expensive (~10x here).     |
+| Streaming body rewriting      | `.replace` is the wrong abstraction unless the whole body is buffered first.  |
+| Chunk-boundary matches        | Per-chunk replacement is incorrect. Prism is designed to handle this.         |
+
+So the benchmark is not saying "Prism is always faster than `String.replace`." The real
+claim is: Prism solves the streaming rewrite problem that `String.replace` does not model.
+
+## The core example
+
+Suppose the response contains this URL:
+
+```
+https://internal.example.com/docs
+```
+
+But the stream arrives like this:
+
+```
+Chunk 1: https://internal.exam
+Chunk 2: ple.com/docs
+```
+
+A per-chunk replacement sees `"https://internal.exam"` and `"ple.com/docs"`. Neither chunk
+contains `internal.example.com`, so nothing is rewritten. Prism sees the stream as a
+continuous sequence of bytes and keeps enough suffix state to complete the match when the
+next chunk arrives. The result is correct:
+
+```
+https://public.example.com/docs
+```
+
+without buffering the whole response.
+
+## When not to use Prism
+
+Do not use Prism when a simple `String.replace` is enough:
+
+```scala
+val result = smallString.replace("foo", "bar")
+```
+
+That is simpler, clearer, and likely just as fast or faster. Prism is useful when the
+problem has at least one of these properties:
+
+- the data is streaming
+- the body may be large
+- matches can cross chunk boundaries
+- buffering the whole body is undesirable
+- rewrite rules are numerous or structured
+- the rewrite logic belongs inside a Pekko Streams pipeline
+- the transformation is part of a proxy, gateway, crawler, or HTTP middleware
+
+## Summary
+
+`String.replace` is a great string API. Prism is a streaming rewrite engine. Those are
+different tools.
+
+For small complete strings, use `String.replace`. For HTTP bodies, proxy responses, TCP
+streams, file streams, or any byte stream where matches may cross chunk boundaries, use a
+streaming rewriter.
+
+That is the reason Prism exists:
+
+> not to be a faster `.replace`, but to make streaming body rewriting correct, bounded, and
+> composable.
 
 ## Reproduce
 
