@@ -50,7 +50,7 @@ lazy val root = (project in file("."))
 // NOT aggregated by root, so `compile` / `test` / `publish` don't touch it.
 // Run it explicitly:  sbt "bench/Jmh/run"
 lazy val bench = (project in file("bench"))
-  .dependsOn(root)
+  .dependsOn(root, zio)
   .enablePlugins(JmhPlugin)
   .settings(
     name           := "prism-bench",
