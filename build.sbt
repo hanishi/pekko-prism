@@ -4,8 +4,21 @@ ThisBuild / version      := "0.1.0-SNAPSHOT"
 
 val pekkoVersion     = "1.6.0"
 val pekkoHttpVersion = "1.3.0"
+val zioVersion       = "2.1.14"
+
+// The pure rewriting engine: matchers (Aho-Corasick, BMH, Wu-Manber) and rewriters.
+// Depends ONLY on pekko-actor for the `ByteString` data type -- no pekko-stream, no
+// pekko-http -- so it can be driven from any streaming runtime (Pekko Streams, ZIO
+// Streams, fs2, ...). The `Rewriter` contract is framework-agnostic by design.
+lazy val core = (project in file("core"))
+  .settings(
+    name := "pekko-prism-core",
+    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
+    libraryDependencies += "org.apache.pekko" %% "pekko-actor" % pekkoVersion
+  )
 
 lazy val root = (project in file("."))
+  .dependsOn(core)
   .settings(
     name := "pekko-prism",
     scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
@@ -43,4 +56,19 @@ lazy val bench = (project in file("bench"))
     name           := "prism-bench",
     publish / skip := true,
     Compile / doc / sources := Seq.empty
+  )
+
+// Proof that the engine ports: the same `core` driven from ZIO Streams as a `ZPipeline`
+// instead of a Pekko `GraphStage`. No HTTP, no pekko-stream -- only `core` (+ ByteString)
+// and zio-streams. Run its tests:  sbt "zio/test"
+lazy val zio = (project in file("zio"))
+  .dependsOn(core)
+  .settings(
+    name := "pekko-prism-zio",
+    scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked"),
+    libraryDependencies ++= Seq(
+      "dev.zio"       %% "zio-streams" % zioVersion,
+      "org.scalatest" %% "scalatest"   % "3.2.20" % Test
+    ),
+    publish / skip := true
   )
