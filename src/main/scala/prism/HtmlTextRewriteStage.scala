@@ -23,9 +23,12 @@ import org.apache.pekko.util.{ByteString, ByteStringBuilder}
  *
  * Scope: it understands tags (with quoted attribute values that may contain `>`),
  * `<!-- comments -->`, and `<script>`/`<style>` raw-text elements (closed by
- * `</script` / `</style`). It does not special-case CDATA, processing
- * instructions, or SVG/MathML foreign content; those are emitted verbatim, which
- * is safe (it just means no rewriting inside them).
+ * `</script` / `</style`). Other markup is only approximated: any other `<!…>`
+ * (doctype, CDATA section) is consumed as markup up to the first unquoted `>`,
+ * so a CDATA payload containing `>` has its remainder rewritten as text; `<?` is
+ * not recognized as markup at all (the `<` is literal text), so
+ * processing-instruction content is rewritten as text. SVG/MathML foreign
+ * content gets the ordinary tag/text treatment.
  */
 final class HtmlTextRewriteStage(inner: Rewriter)
     extends GraphStage[FlowShape[ByteString, ByteString]] {
@@ -41,6 +44,11 @@ final class HtmlTextRewriteStage(inner: Rewriter)
 
   private val ScriptClose = "</script".getBytes("US-ASCII")
   private val StyleClose  = "</style".getBytes("US-ASCII")
+
+  // The tag-name probe exists only to tell script/style apart from everything else,
+  // so one letter beyond "script" always decides it. Capping the probe bounds the
+  // carry against pathological input ('<' followed by letters without end).
+  private final val TagNameProbe = "script".length + 1
 
   override def createLogic(attrs: Attributes): GraphStageLogic =
     new GraphStageLogic(shape) {
@@ -121,9 +129,11 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                     beginTag(out, closing = true, raw = Array.emptyByteArray)
                   } else if (isLetter(c1)) {
                     var k = p + 1
-                    while (k < n && isLetter(a(k))) k += 1
-                    if (k >= n && !atEOF) hold = true
+                    while (k < n && k - (p + 1) < TagNameProbe && isLetter(a(k))) k += 1
+                    if (k >= n && !atEOF && k - (p + 1) < TagNameProbe) hold = true
                     else {
+                      // Name decided: a non-letter ended it, EOF ended it, or it is
+                      // already longer than "script"/"style" can be (probe cap).
                       val name = new String(a, p + 1, k - (p + 1)).toLowerCase
                       val raw  = if (name == "script") ScriptClose
                                  else if (name == "style") StyleClose

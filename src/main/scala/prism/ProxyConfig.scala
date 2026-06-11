@@ -100,13 +100,22 @@ object RuleFlow {
    * leftmost-by-end, so the two produce the same output and we may dispatch to the
    * faster one. Divergence is only possible when one match's span contains another's,
    * which requires substring containment.
+   *
+   * `p == q` is allowed only because [[build]] dedupes equal `from`s first — with
+   * true duplicates in the list, Wu-Manber would pick the last while Aho-Corasick
+   * picks the first.
    */
   private[prism] def independent(ps: List[String]): Boolean =
     ps.forall(p => ps.forall(q => p == q || !q.contains(p)))
 
   def build(rules: List[Rule], textOnly: Boolean): Flow[ByteString, ByteString, ?] = {
-    val literal = rules.collect { case Rule.Rewrite(f, t) => (f, t) }
-    val words   = rules.collect { case Rule.RewriteWord(f, t) => (f, t) }
+    // Dedup by `from`, first rule wins. Aho-Corasick already keeps the first of two
+    // equal patterns (a trie terminal is only displaced by a strictly longer one), but
+    // Wu-Manber's candidate lists would let the LAST duplicate win — dedup before
+    // dispatch keeps every matcher's selection identical. A duplicate that collapses
+    // to a single rule also gets the faster BMH path.
+    val literal = rules.collect { case Rule.Rewrite(f, t) => (f, t) }.distinctBy(_._1)
+    val words   = rules.collect { case Rule.RewriteWord(f, t) => (f, t) }.distinctBy(_._1)
     val wraps   = rules.collect { case Rule.WrapUrl(a, t) => (a, t) }
     val inserts = rules.collect {
       case Rule.InsertBefore(a, h) => (a, h + a)

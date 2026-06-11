@@ -130,6 +130,31 @@ class ProxyConfigSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
     "be identity with no rules" in {
       run(parse("""prism.proxy { origin="http://u" }"""), "<p>x</p>") shouldBe "<p>x</p>"
     }
+
+    // Regression: duplicate `from`s used to slip past the Wu-Manber dispatch guard
+    // (`independent` treats p == q as independent) and Wu-Manber picks the LAST
+    // duplicate where Aho-Corasick picks the first. Dedup at dispatch makes the
+    // first rule win on every matcher.
+    "give the first rule precedence when two rules share a `from`" in {
+      val single = parse("""prism.proxy {
+        origin = "http://u"
+        rules = [
+          { type = rewrite, from = "ab", to = "1" }
+          { type = rewrite, from = "ab", to = "2" }
+        ]
+      }""")
+      run(single, "xxabyy") shouldBe "xx1yy" // collapses to one rule -> BMH path
+
+      val multi = parse("""prism.proxy {
+        origin = "http://u"
+        rules = [
+          { type = rewrite, from = "ab", to = "1" }
+          { type = rewrite, from = "ab", to = "2" }
+          { type = rewrite, from = "cd", to = "3" }
+        ]
+      }""")
+      run(multi, "xxabyycdz") shouldBe "xx1yy3z" // still multi-pattern -> Wu-Manber path
+    }
   }
 
   "ProxyConfig scoped rules" should {

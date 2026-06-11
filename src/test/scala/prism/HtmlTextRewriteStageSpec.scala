@@ -62,6 +62,25 @@ class HtmlTextRewriteStageSpec extends AnyWordSpec with Matchers with BeforeAndA
       // "head" is broken by the <b> tag → two text nodes, no match
       oneShot("he<b>ad</b> and head") shouldBe "he<b>ad</b> and HEAD"
     }
+    "treat a tag name longer than the script/style probe as a generic tag" in {
+      // 8-letter name exceeds the probe cap: classified generic before the name ends
+      oneShot("<scripted>head</scripted>head") shouldBe "<scripted>HEAD</scripted>HEAD"
+    }
+    "handle an absurdly long tag name (capped probe, bounded carry)" in {
+      val tag = "a" * 100000
+      stream(s"<$tag x=y>head</$tag> head", 1024) shouldBe s"<$tag x=y>HEAD</$tag> HEAD"
+    }
+    "classify script/style correctly when the name straddles ANY chunk boundary" in {
+      val docs = List(
+        "<script>head</script>head",     // raw-text element: inner text untouched
+        "<scripts>head</scripts>head",   // one letter past "script": generic tag
+        "<style>head</style>head",
+        "<styled>head</styled>head"
+      )
+      for (doc <- docs; size <- 1 to doc.length) withClue(s"doc=$doc chunk=$size: ") {
+        stream(doc, size) shouldBe oneShot(doc)
+      }
+    }
   }
 
   "HtmlTextRewriteStage (streaming)" should {
