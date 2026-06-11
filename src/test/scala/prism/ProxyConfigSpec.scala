@@ -155,6 +155,21 @@ class ProxyConfigSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
       }""")
       run(multi, "xxabyycdz") shouldBe "xx1yy3z" // still multi-pattern -> Wu-Manber path
     }
+
+    // Regression: inserts share one Aho-Corasick pattern per anchor, so a second
+    // insert on the same anchor used to be silently dropped. They must merge:
+    // befores in rule order, then the anchor, then afters in rule order.
+    "apply every insert when several share an anchor" in {
+      val c = parse("""prism.proxy {
+        origin = "http://u"
+        rules = [
+          { type = insert-before, anchor = "</head>", html = "<a>" }
+          { type = insert-before, anchor = "</head>", html = "<b>" }
+          { type = insert-after,  anchor = "</head>", html = "<c>" }
+        ]
+      }""")
+      run(c, "x</head>y") shouldBe "x<a><b></head><c>y"
+    }
   }
 
   "ProxyConfig scoped rules" should {

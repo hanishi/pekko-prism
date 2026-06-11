@@ -62,6 +62,16 @@ class HtmlTextRewriteStageSpec extends AnyWordSpec with Matchers with BeforeAndA
       // "head" is broken by the <b> tag → two text nodes, no match
       oneShot("he<b>ad</b> and head") shouldBe "he<b>ad</b> and HEAD"
     }
+    "NOT treat custom elements whose name starts with script/style as raw text" in {
+      // The name must END after "script"/"style" (whitespace, '/', '>'); a '-' or
+      // digit means a different element, whose text content is still rewritten.
+      oneShot("<script-foo>head</script-foo>head") shouldBe "<script-foo>HEAD</script-foo>HEAD"
+      oneShot("<script2>head</script2>head")       shouldBe "<script2>HEAD</script2>HEAD"
+      oneShot("<style-x>head</style-x>head")       shouldBe "<style-x>HEAD</style-x>HEAD"
+      // sanity: a real script with attributes is still raw text
+      oneShot("""<script type="t">head</script>head""") shouldBe
+        """<script type="t">head</script>HEAD"""
+    }
     "treat a tag name longer than the script/style probe as a generic tag" in {
       // 8-letter name exceeds the probe cap: classified generic before the name ends
       oneShot("<scripted>head</scripted>head") shouldBe "<scripted>HEAD</scripted>HEAD"
@@ -72,8 +82,9 @@ class HtmlTextRewriteStageSpec extends AnyWordSpec with Matchers with BeforeAndA
     }
     "classify script/style correctly when the name straddles ANY chunk boundary" in {
       val docs = List(
-        "<script>head</script>head",     // raw-text element: inner text untouched
-        "<scripts>head</scripts>head",   // one letter past "script": generic tag
+        "<script>head</script>head",         // raw-text element: inner text untouched
+        "<scripts>head</scripts>head",       // one letter past "script": generic tag
+        "<script-foo>head</script-foo>head", // name continues past a non-letter: generic
         "<style>head</style>head",
         "<styled>head</styled>head"
       )

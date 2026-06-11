@@ -134,10 +134,18 @@ final class HtmlTextRewriteStage(inner: Rewriter)
                     else {
                       // Name decided: a non-letter ended it, EOF ended it, or it is
                       // already longer than "script"/"style" can be (probe cap).
-                      val name = new String(a, p + 1, k - (p + 1)).toLowerCase
-                      val raw  = if (name == "script") ScriptClose
-                                 else if (name == "style") StyleClose
-                                 else Array.emptyByteArray
+                      // Raw-text only when the name truly ENDS here (whitespace, '/',
+                      // '>'): <script-foo> and <script2> are ordinary elements whose
+                      // names merely start with "script".
+                      val terminated = k < n && (isSpace(a(k)) || a(k) == '/' || a(k) == '>')
+                      val raw =
+                        if (!terminated) Array.emptyByteArray
+                        else {
+                          val name = new String(a, p + 1, k - (p + 1)).toLowerCase
+                          if (name == "script") ScriptClose
+                          else if (name == "style") StyleClose
+                          else Array.emptyByteArray
+                        }
                       beginTag(out, closing = false, raw = raw)
                     }
                   } else {

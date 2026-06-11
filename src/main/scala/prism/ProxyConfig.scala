@@ -117,9 +117,17 @@ object RuleFlow {
     val literal = rules.collect { case Rule.Rewrite(f, t) => (f, t) }.distinctBy(_._1)
     val words   = rules.collect { case Rule.RewriteWord(f, t) => (f, t) }.distinctBy(_._1)
     val wraps   = rules.collect { case Rule.WrapUrl(a, t) => (a, t) }
-    val inserts = rules.collect {
-      case Rule.InsertBefore(a, h) => (a, h + a)
-      case Rule.InsertAfter(a, h)  => (a, a + h)
+    // Aho-Corasick keeps one pattern per `from`, so several inserts on one anchor must
+    // be merged into a single replacement, not listed (a list would keep only the
+    // first): befores in rule order, then the anchor, then afters in rule order.
+    val insertAnchors = rules.collect {
+      case Rule.InsertBefore(anchor, _) => anchor
+      case Rule.InsertAfter(anchor, _)  => anchor
+    }.distinct
+    val inserts = insertAnchors.map { anchor =>
+      val before = rules.collect { case Rule.InsertBefore(`anchor`, h) => h }.mkString
+      val after  = rules.collect { case Rule.InsertAfter(`anchor`, h) => h }.mkString
+      (anchor, before + anchor + after)
     }
 
     val content = ListBuffer[Rewriter]()
